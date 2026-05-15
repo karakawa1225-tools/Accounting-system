@@ -1,0 +1,25 @@
+import { asc } from "drizzle-orm";
+import { getCompanyRow } from "@/app/admin/company/actions";
+import { getDb } from "@/db";
+import { customers } from "@/db/schema";
+import { getArRecentLines, getReceivableBalances } from "./actions";
+import { ReceivablesView } from "./view";
+
+export default async function ReceivablesPage() {
+  const db = getDb();
+  const [balances, customerRows, recentLines, company] = await Promise.all([
+    getReceivableBalances(),
+    db.select({ id: customers.id, name: customers.name, code: customers.code }).from(customers).orderBy(asc(customers.code), asc(customers.name)),
+    getArRecentLines(),
+    getCompanyRow(),
+  ]);
+  return (
+    <ReceivablesView
+      balances={balances}
+      customers={customerRows}
+      recentLines={recentLines}
+      fiscalStart={company.fiscalPeriodStart}
+      fiscalEnd={company.fiscalPeriodEnd}
+    />
+  );
+}
