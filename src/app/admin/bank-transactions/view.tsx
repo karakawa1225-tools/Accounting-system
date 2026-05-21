@@ -65,6 +65,11 @@ export function BankTransactionsView({
   /** showModal の <dialog> は top-layer のため Select のリストを dialog 直下にポートする必要がある */
   const [dialogPortalHost, setDialogPortalHost] = useState<HTMLElement | null>(null);
 
+  const bindDialogRef = (node: HTMLDialogElement | null) => {
+    dlg.current = node;
+    if (node && dialogPortalHost !== node) setDialogPortalHost(node);
+  };
+
   const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [flowFilter, setFlowFilter] = useState<"all" | "in" | "out">("all");
   const [lineKeyword, setLineKeyword] = useState("");
@@ -99,17 +104,19 @@ export function BankTransactionsView({
   const [accountPickQuery, setAccountPickQuery] = useState("");
 
   const filteredPickAccounts = useMemo(() => {
-    if (!accountPickQuery.trim()) return accounts;
-    return accounts.filter((a) => {
-      const cat = (a.divisionName && a.divisionName.trim()) || accountCatLabel[a.category] || a.category;
-      return matchesListSearch([a.name, a.code, cat].filter(Boolean).join(" "), accountPickQuery);
-    });
-  }, [accounts, accountPickQuery]);
-
-  const selectedCounterAccount = useMemo(
-    () => (counterAccountId ? accounts.find((a) => a.id === counterAccountId) : undefined),
-    [accounts, counterAccountId]
-  );
+    const q = accountPickQuery.trim();
+    const list = !q
+      ? accounts
+      : accounts.filter((a) => {
+          const cat = (a.divisionName && a.divisionName.trim()) || accountCatLabel[a.category] || a.category;
+          return matchesListSearch([a.name, a.code, cat].filter(Boolean).join(" "), q);
+        });
+    // Radix Select は選択中の Item が DOM に無いとトリガーに表示されない（検索絞り込み直後の1回目が空になる）
+    if (!counterAccountId) return list;
+    const selected = accounts.find((a) => a.id === counterAccountId);
+    if (!selected || list.some((a) => a.id === counterAccountId)) return list;
+    return [selected, ...list];
+  }, [accounts, accountPickQuery, counterAccountId]);
 
   const openDialog = () => {
     setMsg("");
@@ -307,10 +314,7 @@ export function BankTransactionsView({
       </div>
 
       <dialog
-        ref={(node) => {
-          dlg.current = node;
-          setDialogPortalHost(node);
-        }}
+        ref={bindDialogRef}
         className="w-full max-w-lg rounded-xl border border-slate-300 bg-white p-0 shadow-2xl backdrop:bg-black/40"
       >
         <div className="p-6">
@@ -405,20 +409,24 @@ export function BankTransactionsView({
               ) : null}
               <Select
                 value={counterAccountId || "__none__"}
-                onValueChange={(v) => setCounterAccountId(v === "__none__" ? "" : v)}
+                onValueChange={(v) => {
+                  const id = v === "__none__" ? "" : v;
+                  setCounterAccountId(id);
+                  if (id) setAccountPickQuery("");
+                }}
               >
                 <SelectTrigger className="min-h-11 text-left">
-                  <SelectValue placeholder="勘定科目名を選択" className="font-extrabold tracking-wide text-slate-900">
-                    {selectedCounterAccount?.name}
-                  </SelectValue>
+                  <SelectValue placeholder="勘定科目名を選択" className="font-extrabold tracking-wide text-slate-900" />
                 </SelectTrigger>
                 <SelectContent container={dialogPortalHost} className="max-h-72">
-                  <SelectItem value="__none__">選択してください</SelectItem>
+                  <SelectItem value="__none__" textValue="選択してください">
+                    選択してください
+                  </SelectItem>
                   {filteredPickAccounts.map((a) => {
                     const cat = (a.divisionName && a.divisionName.trim()) || accountCatLabel[a.category] || a.category;
-                    const textValue = [a.name, a.code, cat].filter(Boolean).join(" ");
+                    const textValue = [a.code, a.name].filter(Boolean).join(" ");
                     return (
-                      <SelectItem key={a.id} value={a.id} textValue={textValue}>
+                      <SelectItem key={a.id} value={a.id} textValue={textValue || a.name}>
                         <div className="flex flex-col gap-0.5 py-0.5 text-left">
                           <span className="text-base font-extrabold tracking-wide text-slate-900">{a.name}</span>
                           <span className="text-xs font-semibold text-slate-500">
