@@ -11,6 +11,7 @@ const SYSTEM_ACCOUNT_ROWS: { code: string; name: string; category: AccountCatego
   { code: "SYS_AP", name: "買掛金", category: "liability" },
   { code: "SYS_PURCHASES", name: "仕入高", category: "expense" },
   { code: "SYS_OPENING", name: "期首貸借調整", category: "equity" },
+  { code: "SYS_BANK_FEE", name: "振込手数料", category: "expense" },
 ];
 
 /** 未投入の標準勘定行だけ挿入する。削除後の復旧用（ミドルウェア／各画面では呼ばず、明示的な操作や seed のみ）。 */
@@ -42,6 +43,7 @@ export const SYSTEM_ACCOUNT_CODES = {
   PURCHASES: "SYS_PURCHASES",
   /** 期首残高の貸借差額を吸収する純資産勘定（ユーザー入力の合計と複式で釣り合わせる） */
   OPENING: "SYS_OPENING",
+  BANK_FEE: "SYS_BANK_FEE",
 } as const;
 
 export async function getSystemAccounts(db: Database) {
@@ -69,5 +71,6 @@ export async function getSystemAccounts(db: Database) {
     apId: map.get(SYSTEM_ACCOUNT_CODES.AP)!,
     purchasesId: map.get(SYSTEM_ACCOUNT_CODES.PURCHASES)!,
     openingId: map.get(SYSTEM_ACCOUNT_CODES.OPENING)!,
+    bankFeeId: map.get(SYSTEM_ACCOUNT_CODES.BANK_FEE)!,
   };
 }

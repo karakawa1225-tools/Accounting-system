@@ -184,6 +184,10 @@ export const transactions = sqliteTable(
     debitAmountMinor: integer("debit_amount_minor").notNull().default(0),
     creditAmountMinor: integer("credit_amount_minor").notNull().default(0),
     summary: text("summary"),
+    /** 振込手数料（円）。入金・支払消込時のみ */
+    transferFeeMinor: integer("transfer_fee_minor"),
+    /** 手数料負担: our=当社負担, counterparty=貴社負担 */
+    feeBearer: text("fee_bearer"),
     kind: text("kind", { enum: transactionKindEnum }).notNull(),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull().$defaultFn(() => new Date()),
     updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull().$defaultFn(() => new Date()),

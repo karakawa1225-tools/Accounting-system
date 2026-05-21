@@ -15,6 +15,7 @@ const SYSTEM = [
   { code: "SYS_AP", name: "買掛金", category: "liability" },
   { code: "SYS_PURCHASES", name: "仕入高", category: "expense" },
   { code: "SYS_OPENING", name: "期首貸借調整", category: "equity" },
+  { code: "SYS_BANK_FEE", name: "振込手数料", category: "expense" },
 ];
 
 const client = createClient({ url, authToken: process.env.TURSO_AUTH_TOKEN });

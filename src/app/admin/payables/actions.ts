@@ -4,6 +4,11 @@ import { revalidatePath } from "next/cache";
 import { and, asc, desc, eq, gt, isNotNull, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { apAllocations, transactions, vendors } from "@/db/schema";
+import {
+  apAllocationTargetMinor,
+  parseTransferFeeBearer,
+  type TransferFeeBearer,
+} from "@/lib/payment-transfer-fee";
 import { getSystemAccounts } from "@/lib/system-accounts";
 
 export async function registerApPurchase(formData: FormData) {
@@ -292,15 +297,27 @@ export async function registerApPayment(input: {
   vendorId: string;
   transactionDate: string;
   summary: string | null;
-  totalMinor: number;
+  /** 振込支払額（銀行から出金した額） */
+  transferMinor: number;
+  transferFeeMinor: number;
+  feeBearer: TransferFeeBearer;
   allocations: { purchaseApCreditTransactionId: string; amountMinor: number }[];
 }) {
-  const total = Math.floor(input.totalMinor);
+  const transfer = Math.floor(input.transferMinor);
+  const fee = Math.max(0, Math.floor(input.transferFeeMinor || 0));
+  const bearer = parseTransferFeeBearer(input.feeBearer);
+  const allocTarget = apAllocationTargetMinor(transfer, fee, bearer);
   if (!input.vendorId) throw new Error("仕入先を選択してください");
   if (!input.transactionDate) throw new Error("日付を入力してください");
-  if (total <= 0) throw new Error("支払額は1円以上にしてください");
+  if (transfer <= 0) throw new Error("支払額は1円以上にしてください");
+  if (bearer === "counterparty" && fee > transfer) throw new Error("手数料が支払額を超えています");
   const sumAlloc = input.allocations.reduce((s, a) => s + Math.floor(a.amountMinor), 0);
-  if (sumAlloc !== total) throw new Error(`消込合計（${sumAlloc}円）が支払額（${total}円）と一致しません`);
+  if (sumAlloc !== allocTarget) {
+    throw new Error(
+      `消込合計（${sumAlloc}円）が消込対象額（${allocTarget}円）と一致しません` +
+        (bearer === "counterparty" && fee > 0 ? "（貴社負担: 支払額−手数料）" : "")
+    );
+  }
 
   const db = getDb();
   const sys = await getSystemAccounts(db);
@@ -318,20 +335,25 @@ export async function registerApPayment(input: {
   const entryGroupId = crypto.randomUUID();
   const apDebitId = crypto.randomUUID();
   const bankId = crypto.randomUUID();
+  const feeMeta = {
+    transferFeeMinor: fee > 0 ? fee : null,
+    feeBearer: bearer,
+  };
 
   await db.transaction(async (tx) => {
-    await tx.insert(transactions).values([
+    const rows: (typeof transactions.$inferInsert)[] = [
       {
         id: apDebitId,
         entryGroupId,
         transactionDate: input.transactionDate,
         accountId: sys.apId,
         vendorId: input.vendorId,
-        amountMinor: total,
-        debitAmountMinor: total,
+        amountMinor: allocTarget,
+        debitAmountMinor: allocTarget,
         creditAmountMinor: 0,
         summary: input.summary,
         kind: "ap_payment",
+        ...feeMeta,
       },
       {
         id: bankId,
@@ -339,13 +361,29 @@ export async function registerApPayment(input: {
         transactionDate: input.transactionDate,
         accountId: sys.bankId,
         vendorId: input.vendorId,
-        amountMinor: total,
+        amountMinor: transfer,
         debitAmountMinor: 0,
-        creditAmountMinor: total,
+        creditAmountMinor: transfer,
         summary: input.summary,
         kind: "ap_payment",
+        ...feeMeta,
       },
-    ]);
+    ];
+    if (fee > 0 && bearer === "counterparty") {
+      rows.push({
+        entryGroupId,
+        transactionDate: input.transactionDate,
+        accountId: sys.bankFeeId,
+        vendorId: input.vendorId,
+        amountMinor: fee,
+        debitAmountMinor: fee,
+        creditAmountMinor: 0,
+        summary: input.summary,
+        kind: "ap_payment",
+        ...feeMeta,
+      });
+    }
+    await tx.insert(transactions).values(rows);
     for (const a of input.allocations) {
       const amt = Math.floor(a.amountMinor);
       if (amt <= 0) continue;

@@ -5,6 +5,7 @@ import { useMemo, useRef, useState, useTransition } from "react";
 import { MonthlyExportLinks } from "@/components/monthly-export-links";
 import { FiscalPeriodInlineTable } from "@/lib/fiscal-period-ui";
 import { matchesListSearch } from "@/lib/list-search";
+import { arAllocationTargetMinor, type TransferFeeBearer } from "@/lib/payment-transfer-fee";
 import { deleteArHistoryLine, getArOpenLines, registerArPayment, registerArSale, updateArHistoryLine, type ArOpenLine } from "./actions";
 
 function yen(v: number) {
@@ -85,6 +86,8 @@ export function ReceivablesView({
   const [payCustomerId, setPayCustomerId] = useState("");
   const [payDate, setPayDate] = useState("");
   const [payTotal, setPayTotal] = useState("");
+  const [payFee, setPayFee] = useState("");
+  const [payFeeBearer, setPayFeeBearer] = useState<TransferFeeBearer>("counterparty");
   const [paySummary, setPaySummary] = useState("");
   const [openLines, setOpenLines] = useState<ArOpenLine[]>([]);
   const [alloc, setAlloc] = useState<Record<string, string>>({});
@@ -179,6 +182,13 @@ export function ReceivablesView({
     [alloc]
   );
 
+  const transferMinor = Math.max(0, Math.floor(Number(payTotal || 0)));
+  const feeMinor = Math.max(0, Math.floor(Number(payFee || 0)));
+  const allocTargetMinor = useMemo(
+    () => arAllocationTargetMinor(transferMinor, feeMinor, payFeeBearer),
+    [transferMinor, feeMinor, payFeeBearer]
+  );
+
   const openPayment = (customerId: string) => {
     setMsg("");
     setPayCustomerId(customerId);
@@ -188,15 +198,13 @@ export function ReceivablesView({
   };
 
   const applyFifo = () => {
-    const t = Math.max(0, Math.floor(Number(payTotal || 0)));
-    const m = fifoAllocate(openLines, t);
+    const m = fifoAllocate(openLines, allocTargetMinor);
     const next: Record<string, string> = {};
     for (const l of openLines) next[l.id] = String(m[l.id] ?? 0);
     setAlloc(next);
   };
 
   const submitPayment = () => {
-    const totalMinor = Math.floor(Number(payTotal || 0));
     const allocations = openLines
       .map((l) => ({ salesArDebitTransactionId: l.id, amountMinor: Math.floor(Number(alloc[l.id] || 0)) }))
       .filter((a) => a.amountMinor > 0);
@@ -205,7 +213,9 @@ export function ReceivablesView({
         customerId: payCustomerId,
         transactionDate: payDate,
         summary: paySummary.trim() || null,
-        totalMinor,
+        transferMinor,
+        transferFeeMinor: feeMinor,
+        feeBearer: payFeeBearer,
         allocations,
       })
         .then(() => {
@@ -487,9 +497,36 @@ export function ReceivablesView({
             <input style={inp} type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} />
           </label>
           <label style={{ display: "grid", gap: 6, fontSize: 16, fontWeight: 700, letterSpacing: "0.05em" }}>
-            入金額（税込・円）
-            <input style={inp} type="number" min={1} step={1} value={payTotal} onChange={(e) => setPayTotal(e.target.value)} />
+            振込金額・入金額（税込・円）
+            <input style={inp} type="number" min={0} step={1} value={payTotal} onChange={(e) => setPayTotal(e.target.value)} />
           </label>
+          <label style={{ display: "grid", gap: 6, fontSize: 16, fontWeight: 700, letterSpacing: "0.05em" }}>
+            振込手数料（円）
+            <input style={inp} type="number" min={0} step={1} value={payFee} onChange={(e) => setPayFee(e.target.value)} placeholder="0" />
+          </label>
+          <fieldset style={{ border: "1px solid #e2e8f0", borderRadius: 8, padding: "10px 12px", margin: 0 }}>
+            <legend style={{ fontSize: 14, fontWeight: 800, color: "#475569", padding: "0 4px" }}>手数料負担</legend>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 16, fontSize: 15, fontWeight: 700 }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                <input
+                  type="radio"
+                  name="arFeeBearer"
+                  checked={payFeeBearer === "our"}
+                  onChange={() => setPayFeeBearer("our")}
+                />
+                当社負担（消込＝振込金額＋手数料）
+              </label>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                <input
+                  type="radio"
+                  name="arFeeBearer"
+                  checked={payFeeBearer === "counterparty"}
+                  onChange={() => setPayFeeBearer("counterparty")}
+                />
+                貴社負担（消込＝振込金額のみ）
+              </label>
+            </div>
+          </fieldset>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button type="button" style={btnGhost} onClick={applyFifo} disabled={!openLines.length}>
               入金額を古い順に自動配分
@@ -513,9 +550,18 @@ export function ReceivablesView({
             <input style={inp} value={paySummary} onChange={(e) => setPaySummary(e.target.value)} placeholder="例：振込入金" />
           </label>
 
-          <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: "0.04em", color: "#64748b" }}>
-            消込合計: {yen(allocSum)} / 入金額: {yen(Math.floor(Number(payTotal || 0)))}
-            {allocSum !== Math.floor(Number(payTotal || 0)) ? <span style={{ color: "#b91c1c", marginLeft: 8 }}>一致させてください</span> : null}
+          <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: "0.04em", color: "#64748b", lineHeight: 1.55 }}>
+            消込合計: {yen(allocSum)} / 消込対象額: {yen(allocTargetMinor)}
+            {allocSum !== allocTargetMinor ? <span style={{ color: "#b91c1c", marginLeft: 8 }}>一致させてください</span> : null}
+            <div style={{ marginTop: 4, fontSize: 13, fontWeight: 600 }}>
+              振込金額 {yen(transferMinor)}
+              {feeMinor > 0 ? (
+                <>
+                  {" "}
+                  ／ 手数料 {yen(feeMinor)}（{payFeeBearer === "our" ? "当社負担→消込に加算" : "貴社負担→消込に含めない"}）
+                </>
+              ) : null}
+            </div>
           </div>
 
           <div style={{ overflowX: "auto", border: "1px solid #e2e8f0", borderRadius: 8 }}>
@@ -563,7 +609,7 @@ export function ReceivablesView({
             <button
               type="button"
               style={btn}
-              disabled={pending || !payCustomerId || !payDate || allocSum !== Math.floor(Number(payTotal || 0)) || allocSum <= 0}
+              disabled={pending || !payCustomerId || !payDate || transferMinor <= 0 || allocSum !== allocTargetMinor || allocSum <= 0}
               onClick={submitPayment}
             >
               登録

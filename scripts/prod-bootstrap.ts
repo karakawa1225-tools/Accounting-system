@@ -10,6 +10,7 @@ const steps = [
   ["drizzle migrate", () => execSync("npx drizzle-kit migrate", { stdio: "inherit" })],
   ["companies", () => execSync("node scripts/ensure-companies-table.mjs", { stdio: "inherit" })],
   ["accounting tables", () => execSync("node scripts/ensure-accounting-tables.mjs", { stdio: "inherit" })],
+  ["payment fee columns", () => execSync("node scripts/ensure-payment-fee-columns.mjs", { stdio: "inherit" })],
   ["system accounts", () => execSync("node scripts/ensure-system-accounts.mjs", { stdio: "inherit" })],
   ["payees", () => execSync("node scripts/ensure-payees-table.mjs", { stdio: "inherit" })],
   ["customer payment terms", () => execSync("node scripts/ensure-customer-payment-terms.mjs", { stdio: "inherit" })],
