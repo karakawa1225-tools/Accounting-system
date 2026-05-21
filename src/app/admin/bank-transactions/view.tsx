@@ -18,7 +18,12 @@ import { ACCOUNT_CATEGORY_LABEL_JA } from "@/lib/account-category";
 import { matchesListSearch } from "@/lib/list-search";
 import { MonthlyExportLinks } from "@/components/monthly-export-links";
 import { FiscalPeriodInlineTable } from "@/lib/fiscal-period-ui";
-import { registerBankMovement, type BankLedgerLine } from "./actions";
+import {
+  deleteBankCashMovement,
+  registerBankMovement,
+  updateBankCashMovement,
+  type BankLedgerLine,
+} from "./actions";
 
 function yen(v: number) {
   return new Intl.NumberFormat("ja-JP", { style: "currency", currency: "JPY", maximumFractionDigits: 0 }).format(v);
@@ -102,6 +107,8 @@ export function BankTransactionsView({
   const [customerId, setCustomerId] = useState<string>("");
   const [payeeId, setPayeeId] = useState<string>("");
   const [accountPickQuery, setAccountPickQuery] = useState("");
+  const [dialogMode, setDialogMode] = useState<"create" | "edit">("create");
+  const [editingLineId, setEditingLineId] = useState("");
 
   const filteredPickAccounts = useMemo(() => {
     const q = accountPickQuery.trim();
@@ -118,8 +125,7 @@ export function BankTransactionsView({
     return [selected, ...list];
   }, [accounts, accountPickQuery, counterAccountId]);
 
-  const openDialog = () => {
-    setMsg("");
+  const resetForm = () => {
     setTxDate(new Date().toISOString().slice(0, 10));
     setAmountStr("");
     setSummary("");
@@ -128,8 +134,42 @@ export function BankTransactionsView({
     setPayeeId("");
     setDirection("in");
     setAccountPickQuery("");
+    setEditingLineId("");
+  };
+
+  const openDialog = () => {
+    setMsg("");
+    setDialogMode("create");
+    resetForm();
     dlg.current?.showModal();
   };
+
+  const openEditDialog = (line: BankLedgerLine) => {
+    if (line.kind !== "cash") return;
+    setMsg("");
+    setDialogMode("edit");
+    setEditingLineId(line.id);
+    setTxDate(line.transactionDate);
+    setAmountStr(String(line.amountMinor));
+    setSummary(line.summary ?? "");
+    setDirection(line.flow);
+    setCounterAccountId(line.counterAccountId ?? "");
+    setCustomerId(line.flow === "in" ? line.customerId ?? "" : "");
+    setPayeeId(line.flow === "out" ? line.payeeId ?? "" : "");
+    setAccountPickQuery("");
+    dlg.current?.showModal();
+  };
+
+  const movementPayload = () => ({
+    bankAccountId,
+    transactionDate: txDate,
+    amountMinor: Math.floor(Number(amountStr || 0)),
+    direction,
+    counterAccountId,
+    summary: summary.trim() || null,
+    customerId: direction === "in" && customerId ? customerId : null,
+    payeeId: direction === "out" && payeeId ? payeeId : null,
+  });
 
   const submit = () => {
     setMsg("");
@@ -140,21 +180,29 @@ export function BankTransactionsView({
     }
 
     startTransition(() => {
-      void registerBankMovement({
-        bankAccountId,
-        transactionDate: txDate,
-        amountMinor,
-        direction,
-        counterAccountId,
-        summary: summary.trim() || null,
-        customerId: direction === "in" && customerId ? customerId : null,
-        payeeId: direction === "out" && payeeId ? payeeId : null,
-      })
+      const action =
+        dialogMode === "edit" && editingLineId
+          ? updateBankCashMovement(editingLineId, movementPayload())
+          : registerBankMovement(movementPayload());
+      void action
         .then(() => {
           dlg.current?.close();
           router.refresh();
         })
-        .catch((e: Error) => setMsg(e?.message ?? "登録に失敗しました"));
+        .catch((e: Error) => setMsg(e?.message ?? (dialogMode === "edit" ? "更新に失敗しました" : "登録に失敗しました")));
+    });
+  };
+
+  const handleDelete = (line: BankLedgerLine) => {
+    if (line.kind !== "cash") return;
+    if (!window.confirm(`${line.transactionDate} の${line.flow === "in" ? "入金" : "出金"}（${yen(line.amountMinor)}）を削除しますか？`)) return;
+    startTransition(() => {
+      void deleteBankCashMovement(line.id, bankAccountId)
+        .then(() => {
+          setMsg("入出金を削除しました");
+          router.refresh();
+        })
+        .catch((e: Error) => setMsg(e?.message ?? "削除に失敗しました"));
     });
   };
 
@@ -185,6 +233,19 @@ export function BankTransactionsView({
           新規登録
         </button>
       </div>
+
+      {msg ? (
+        <div
+          className={cn(
+            "rounded-md border px-3 py-2 text-sm font-bold",
+            msg.includes("失敗") || msg.includes("エラー")
+              ? "border-red-200 bg-red-50 text-red-800"
+              : "border-sky-200 bg-sky-50 text-sky-900"
+          )}
+        >
+          {msg}
+        </div>
+      ) : null}
 
       <FiscalPeriodInlineTable fiscalStart={fiscalStart} fiscalEnd={fiscalEnd} />
 
@@ -277,6 +338,7 @@ export function BankTransactionsView({
               <TableHead className="font-black tracking-wider text-slate-800">相手先</TableHead>
               <TableHead className="font-black tracking-wider text-slate-800">勘定科目</TableHead>
               <TableHead className="min-w-[160px] font-black tracking-wider text-slate-800">摘要・金額</TableHead>
+              <TableHead className="font-black tracking-wider text-slate-800">操作</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -304,11 +366,35 @@ export function BankTransactionsView({
                     {yen(r.amountMinor).replace("¥", "")}
                   </div>
                 </TableCell>
+                <TableCell className="align-top whitespace-nowrap">
+                  {r.kind === "cash" ? (
+                    <div className="flex flex-wrap gap-1">
+                      <button
+                        type="button"
+                        disabled={pending}
+                        onClick={() => openEditDialog(r)}
+                        className="rounded-md border border-slate-300 bg-slate-50 px-2.5 py-1 text-xs font-bold text-slate-700 hover:bg-white"
+                      >
+                        編集
+                      </button>
+                      <button
+                        type="button"
+                        disabled={pending}
+                        onClick={() => handleDelete(r)}
+                        className="rounded-md border border-red-200 bg-red-50 px-2.5 py-1 text-xs font-bold text-red-700 hover:bg-red-100"
+                      >
+                        削除
+                      </button>
+                    </div>
+                  ) : (
+                    <span className="text-xs font-semibold text-slate-400">—</span>
+                  )}
+                </TableCell>
               </TableRow>
             ))}
             {filtered.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={5} className="py-10 text-center font-bold text-slate-500">
+                <TableCell colSpan={6} className="py-10 text-center font-bold text-slate-500">
                   該当する入出金がありません
                 </TableCell>
               </TableRow>
@@ -322,9 +408,13 @@ export function BankTransactionsView({
         className="w-full max-w-lg rounded-xl border border-slate-300 bg-white p-0 shadow-2xl backdrop:bg-black/40"
       >
         <div className="p-6">
-          <h2 className="m-0 text-xl font-black tracking-[0.1em] text-slate-900">入出金の登録</h2>
+          <h2 className="m-0 text-xl font-black tracking-[0.1em] text-slate-900">
+            {dialogMode === "edit" ? "入出金の編集" : "入出金の登録"}
+          </h2>
           <p className="mt-2 text-sm font-semibold leading-relaxed text-slate-600">
-            勘定科目はマスタ一覧から選択します。売掛・買掛の消込は行いません。入金の「顧客」・出金の「支払先」は任意で、通帳の「相手先」に表示します。
+            {dialogMode === "edit"
+              ? "内容を変更すると、銀行口座と相手勘定の仕訳がまとめて更新されます。"
+              : "勘定科目はマスタ一覧から選択します。売掛・買掛の消込は行いません。入金の「顧客」・出金の「支払先」は任意で、通帳の「相手先」に表示します。"}
           </p>
 
           {msg ? <div className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm font-bold text-red-800">{msg}</div> : null}
@@ -515,7 +605,7 @@ export function BankTransactionsView({
                 opacity: pending ? 0.75 : 1,
               }}
             >
-              登録
+              {dialogMode === "edit" ? "保存" : "登録"}
             </button>
           </div>
         </div>

@@ -22,9 +22,30 @@ export type BankLedgerLine = {
   counterparty: string | null;
   counterpartyKind: "customer" | "vendor" | "payee" | null;
   accountName: string;
+  counterAccountId: string | null;
+  customerId: string | null;
+  payeeId: string | null;
   summary: string | null;
   kind: string;
 };
+
+export type BankMovementInput = {
+  bankAccountId?: string;
+  transactionDate: string;
+  amountMinor: number;
+  direction: "in" | "out";
+  counterAccountId: string;
+  summary: string | null;
+  customerId: string | null;
+  payeeId: string | null;
+};
+
+function revalidateBankPaths() {
+  revalidatePath("/admin/bank-transactions");
+  revalidatePath("/admin/bank-transactions/monthly-pdf");
+  revalidatePath("/admin/exports/bank-monthly");
+  revalidatePath("/dashboard");
+}
 
 export async function getBankBalanceMinor(bankAccountId?: string): Promise<number> {
   const db = getDb();
@@ -75,6 +96,9 @@ export async function getBankLedgerLines(filter: BankLedgerFilter = {}): Promise
       vendorName: vendors.name,
       payeeName: payees.name,
       counterName: counterAcc.name,
+      counterAccountId: counterpart.accountId,
+      bankCustomerId: transactions.customerId,
+      bankPayeeId: transactions.payeeId,
     })
     .from(transactions)
     .leftJoin(
@@ -118,42 +142,37 @@ export async function getBankLedgerLines(filter: BankLedgerFilter = {}): Promise
       counterparty,
       counterpartyKind,
       accountName,
+      counterAccountId: r.counterAccountId,
+      customerId: r.bankCustomerId,
+      payeeId: r.bankPayeeId,
       summary: r.summary,
       kind: r.kind,
     };
   });
 }
 
-export async function registerBankMovement(input: {
-  bankAccountId?: string;
-  transactionDate: string;
-  amountMinor: number;
-  direction: "in" | "out";
-  counterAccountId: string;
-  summary: string | null;
-  customerId: string | null;
-  payeeId: string | null;
-}) {
+async function assertBankMovementInput(input: BankMovementInput, bankAccountId: string) {
   const amount = Math.floor(input.amountMinor);
   if (!input.transactionDate) throw new Error("日付を入力してください");
   if (amount <= 0) throw new Error("金額は1円以上で入力してください");
-
-  const db = getDb();
-  const sys = await getSystemAccounts(db);
-  const bankAccountId = input.bankAccountId ?? sys.bankId;
-  const summary = input.summary?.trim() ? input.summary.trim() : null;
-
   if (input.direction === "in" && input.payeeId) throw new Error("入金時は支払先を選べません（任意メモは顧客のみ）");
   if (input.direction === "out" && input.customerId) throw new Error("出金時は顧客を選べません（任意メモは支払先のみ）");
-
   const counterId = input.counterAccountId;
   if (!counterId) throw new Error("勘定科目を選択してください");
   if (counterId === bankAccountId) throw new Error("勘定科目に選択中の銀行口座は選べません");
+  return { amount, summary: input.summary?.trim() ? input.summary.trim() : null, counterId };
+}
 
+async function insertBankMovementPair(
+  db: ReturnType<typeof getDb>,
+  entryGroupId: string,
+  bankAccountId: string,
+  input: BankMovementInput
+) {
+  const { amount, summary, counterId } = await assertBankMovementInput(input, bankAccountId);
   const customerOnBank = input.direction === "in" ? input.customerId : null;
   const payeeOnBank = input.direction === "out" ? input.payeeId : null;
 
-  const entryGroupId = crypto.randomUUID();
   if (input.direction === "in") {
     await db.insert(transactions).values([
       {
@@ -213,8 +232,41 @@ export async function registerBankMovement(input: {
       },
     ]);
   }
+}
 
-  revalidatePath("/admin/bank-transactions");
-  revalidatePath("/admin/bank-transactions/monthly-pdf");
-  revalidatePath("/dashboard");
+async function getEditableBankCashRow(db: ReturnType<typeof getDb>, bankTransactionId: string, bankAccountId: string) {
+  const [row] = await db.select().from(transactions).where(eq(transactions.id, bankTransactionId)).limit(1);
+  if (!row || row.accountId !== bankAccountId || row.kind !== "cash" || !row.entryGroupId) {
+    throw new Error("編集できる入出金が見つかりません");
+  }
+  return row;
+}
+
+export async function registerBankMovement(input: BankMovementInput) {
+  const db = getDb();
+  const sys = await getSystemAccounts(db);
+  const bankAccountId = input.bankAccountId ?? sys.bankId;
+  const entryGroupId = crypto.randomUUID();
+  await insertBankMovementPair(db, entryGroupId, bankAccountId, input);
+  revalidateBankPaths();
+}
+
+export async function updateBankCashMovement(bankTransactionId: string, input: BankMovementInput) {
+  const db = getDb();
+  const sys = await getSystemAccounts(db);
+  const bankAccountId = input.bankAccountId ?? sys.bankId;
+  const row = await getEditableBankCashRow(db, bankTransactionId, bankAccountId);
+  const entryGroupId = row.entryGroupId!;
+  await db.delete(transactions).where(eq(transactions.entryGroupId, entryGroupId));
+  await insertBankMovementPair(db, entryGroupId, bankAccountId, input);
+  revalidateBankPaths();
+}
+
+export async function deleteBankCashMovement(bankTransactionId: string, bankAccountId?: string) {
+  const db = getDb();
+  const sys = await getSystemAccounts(db);
+  const accountId = bankAccountId ?? sys.bankId;
+  const row = await getEditableBankCashRow(db, bankTransactionId, accountId);
+  await db.delete(transactions).where(eq(transactions.entryGroupId, row.entryGroupId!));
+  revalidateBankPaths();
 }
