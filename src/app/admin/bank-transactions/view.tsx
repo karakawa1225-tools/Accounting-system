@@ -274,10 +274,9 @@ export function BankTransactionsView({
             <TableRow className="border-b border-slate-400/80 bg-slate-200/90 hover:bg-slate-200/90">
               <TableHead className="font-black tracking-wider text-slate-800">日付</TableHead>
               <TableHead className="font-black tracking-wider text-slate-800">種類</TableHead>
-              <TableHead className="text-right font-black tracking-wider text-slate-800">金額</TableHead>
               <TableHead className="font-black tracking-wider text-slate-800">相手先</TableHead>
               <TableHead className="font-black tracking-wider text-slate-800">勘定科目</TableHead>
-              <TableHead className="font-black tracking-wider text-slate-800">摘要</TableHead>
+              <TableHead className="min-w-[160px] font-black tracking-wider text-slate-800">摘要・金額</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -291,20 +290,25 @@ export function BankTransactionsView({
                     <span className="text-red-600">出金</span>
                   )}
                 </TableCell>
-                <TableCell
-                  className={`text-right font-mono text-base font-bold ${r.flow === "in" ? "text-sky-700" : "text-red-600"}`}
-                >
-                  {r.flow === "in" ? "+" : "−"}
-                  {yen(r.amountMinor).replace("¥", "")}
-                </TableCell>
-                <TableCell className="max-w-[200px] truncate text-slate-800">{r.counterparty ?? "—"}</TableCell>
+                <TableCell className="max-w-[200px] break-words text-slate-800">{r.counterparty ?? "—"}</TableCell>
                 <TableCell className="font-semibold text-slate-800">{r.accountName}</TableCell>
-                <TableCell className="max-w-[240px] text-slate-700">{r.summary ?? "—"}</TableCell>
+                <TableCell className="min-w-[160px] max-w-sm align-top text-slate-700">
+                  <div className="break-words font-semibold">{r.summary?.trim() ? r.summary : "—"}</div>
+                  <div
+                    className={cn(
+                      "mt-1 text-right font-mono text-base font-bold tabular-nums",
+                      r.flow === "in" ? "text-sky-700" : "text-red-600"
+                    )}
+                  >
+                    {r.flow === "in" ? "+" : "−"}
+                    {yen(r.amountMinor).replace("¥", "")}
+                  </div>
+                </TableCell>
               </TableRow>
             ))}
             {filtered.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="py-10 text-center font-bold text-slate-500">
+                <TableCell colSpan={5} className="py-10 text-center font-bold text-slate-500">
                   該当する入出金がありません
                 </TableCell>
               </TableRow>

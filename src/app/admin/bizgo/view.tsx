@@ -85,7 +85,13 @@ const td: React.CSSProperties = {
   fontWeight: 600,
   lineHeight: 1.35,
   borderTop: "1px solid #f1f5f9",
-  verticalAlign: "middle",
+  verticalAlign: "top",
+};
+const tdWrap: React.CSSProperties = {
+  ...td,
+  whiteSpace: "normal",
+  wordBreak: "break-word",
+  overflowWrap: "anywhere",
 };
 
 type MainKind = "expense" | "trip";
@@ -148,14 +154,13 @@ function DetailTable({ rows }: { rows: (BizgoExpenseRow | BizgoTripRow)[] }) {
             <th style={th}>明細日付</th>
             <th style={th}>区分</th>
             <th style={th}>勘定科目</th>
-            <th style={{ ...th, textAlign: "right" }}>金額（税込）</th>
             <th style={th}>消費税区分</th>
             <th style={{ ...th, textAlign: "right" }}>税抜</th>
             <th style={{ ...th, textAlign: "right" }}>消費税</th>
-            <th style={th}>摘要</th>
+            <th style={{ ...th, minWidth: 140 }}>摘要・金額（税込）</th>
             <th style={th}>領収書</th>
-            <th style={th}>インボイス</th>
-            <th style={th}>登録番号</th>
+            <th style={{ ...th, minWidth: 88 }}>インボイス</th>
+            <th style={{ ...th, minWidth: 100 }}>登録番号</th>
           </tr>
         </thead>
         <tbody>
@@ -164,14 +169,32 @@ function DetailTable({ rows }: { rows: (BizgoExpenseRow | BizgoTripRow)[] }) {
               <td style={{ ...td, whiteSpace: "nowrap" }}>{r.detailDate ?? "—"}</td>
               <td style={td}>{r.categoryLabel}</td>
               <td style={td}>{accountCell(r)}</td>
-              <td style={{ ...td, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{yen(r.amountInclTaxMinor)}</td>
               <td style={td}>{r.taxCategory ?? "—"}</td>
-              <td style={{ ...td, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{yen(r.amountExclTaxMinor)}</td>
-              <td style={{ ...td, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{yen(r.taxAmountMinor)}</td>
-              <td style={{ ...td, maxWidth: 180 }}>{r.summary ?? "—"}</td>
-              <td style={{ ...td, whiteSpace: "nowrap" }}>{r.hasReceipt ?? "—"}</td>
-              <td style={{ ...td, whiteSpace: "nowrap" }}>{r.invoiceFlag ?? "—"}</td>
-              <td style={{ ...td, fontSize: 13 }}>{r.registrationNumber ?? "—"}</td>
+              <td style={{ ...td, textAlign: "right", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
+                {yen(r.amountExclTaxMinor)}
+              </td>
+              <td style={{ ...td, textAlign: "right", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
+                {yen(r.taxAmountMinor)}
+              </td>
+              <td style={{ ...tdWrap, minWidth: 140, maxWidth: 360 }}>
+                <div style={{ fontWeight: 600, color: "#0f172a" }}>{r.summary?.trim() ? r.summary : "—"}</div>
+                <div
+                  style={{
+                    marginTop: 4,
+                    textAlign: "right",
+                    fontVariantNumeric: "tabular-nums",
+                    fontWeight: 800,
+                    fontSize: 14,
+                    color: "#0369a1",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {yen(r.amountInclTaxMinor)}
+                </div>
+              </td>
+              <td style={{ ...tdWrap, whiteSpace: "nowrap" }}>{r.hasReceipt ?? "—"}</td>
+              <td style={{ ...tdWrap, minWidth: 88 }}>{r.invoiceFlag?.trim() ? r.invoiceFlag : "—"}</td>
+              <td style={{ ...tdWrap, fontSize: 13, minWidth: 100 }}>{r.registrationNumber ?? "—"}</td>
             </tr>
           ))}
         </tbody>
