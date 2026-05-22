@@ -1,4 +1,5 @@
 import { getBankLedgerLines } from "@/app/admin/bank-transactions/actions";
+import { splitBankLedgerForDisplay } from "@/lib/bank-ledger-display";
 import { getDb } from "@/db";
 import { accounts } from "@/db/schema";
 import { csvDownloadResponse } from "@/lib/csv-response";
@@ -18,11 +19,26 @@ export async function GET(req: Request) {
   const bankName = acc?.name ?? "銀行口座";
 
   const lines = await getBankLedgerLines({ month, bankAccountId: accountId });
-  const ins = lines.filter((l) => l.flow === "in");
-  const outs = lines.filter((l) => l.flow === "out");
+  const { opening, regular } = splitBankLedgerForDisplay(lines);
+  const ins = regular.filter((l) => l.flow === "in");
+  const outs = regular.filter((l) => l.flow === "out");
   const max = Math.max(ins.length, outs.length, 1);
 
   const rows: string[][] = [];
+  if (opening) {
+    rows.push([
+      opening.transactionDate,
+      String(opening.amountMinor),
+      "期首残高",
+      "期首残高",
+      "[期首残高]",
+      "",
+      "",
+      "",
+      "",
+      "",
+    ]);
+  }
   for (let i = 0; i < max; i++) {
     const inn = ins[i];
     const out = outs[i];

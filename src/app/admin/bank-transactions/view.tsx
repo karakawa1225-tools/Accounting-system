@@ -15,6 +15,7 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import { ACCOUNT_CATEGORY_LABEL_JA } from "@/lib/account-category";
+import { isBankOpeningBalanceLine, splitBankLedgerForDisplay } from "@/lib/bank-ledger-display";
 import { matchesListSearch } from "@/lib/list-search";
 import { MonthlyExportLinks } from "@/components/monthly-export-links";
 import { FiscalPeriodInlineTable } from "@/lib/fiscal-period-ui";
@@ -79,9 +80,11 @@ export function BankTransactionsView({
   const [flowFilter, setFlowFilter] = useState<"all" | "in" | "out">("all");
   const [lineKeyword, setLineKeyword] = useState("");
 
-  const filtered = useMemo(() => {
-    return lines.filter((r) => {
-      if (r.transactionDate.slice(0, 7) !== month) return false;
+  const { openingRow, filtered } = useMemo(() => {
+    const monthLines = lines.filter((r) => r.transactionDate.slice(0, 7) === month);
+    const { opening, regular } = splitBankLedgerForDisplay(monthLines);
+
+    const regularFiltered = regular.filter((r) => {
       if (flowFilter !== "all" && r.flow !== flowFilter) return false;
       if (lineKeyword.trim()) {
         const hay = [
@@ -97,6 +100,20 @@ export function BankTransactionsView({
       }
       return true;
     });
+
+    const showOpening =
+      opening &&
+      (flowFilter === "all" || flowFilter === "in") &&
+      (!lineKeyword.trim() ||
+        matchesListSearch(
+          ["期首残高", opening.transactionDate, String(opening.amountMinor), yen(opening.amountMinor)].join(" "),
+          lineKeyword
+        ));
+
+    return {
+      openingRow: showOpening ? opening : null,
+      filtered: regularFiltered,
+    };
   }, [lines, month, flowFilter, lineKeyword]);
 
   const [direction, setDirection] = useState<"in" | "out">("in");
@@ -318,7 +335,9 @@ export function BankTransactionsView({
           />
         </div>
         <div className="text-sm font-bold text-slate-600">
-          {filtered.length} 件 <span className="font-semibold text-slate-400">（{month}）</span>
+          {filtered.length + (openingRow ? 1 : 0)} 件
+          {openingRow ? <span className="font-semibold text-slate-500">（期首残高1・通常{filtered.length}）</span> : null}{" "}
+          <span className="font-semibold text-slate-400">（{month}）</span>
         </div>
         <MonthlyExportLinks
           month={month}
@@ -342,6 +361,23 @@ export function BankTransactionsView({
             </TableRow>
           </TableHeader>
           <TableBody>
+            {openingRow ? (
+              <TableRow className="border-b border-indigo-200/90 bg-indigo-50/80">
+                <TableCell className="font-bold text-indigo-950">{openingRow.transactionDate}</TableCell>
+                <TableCell>
+                  <span className="text-base font-black tracking-wide text-indigo-800">期首残高</span>
+                </TableCell>
+                <TableCell className="text-indigo-700">—</TableCell>
+                <TableCell className="font-bold text-indigo-900">期首残高</TableCell>
+                <TableCell className="min-w-[160px] align-top">
+                  <div className="text-base font-bold text-indigo-950">[期首残高]</div>
+                  <div className="mt-1 text-right font-mono text-lg font-black tabular-nums text-indigo-800">
+                    +{yen(openingRow.amountMinor).replace("¥", "")}
+                  </div>
+                </TableCell>
+                <TableCell className="align-top text-xs font-semibold text-indigo-600">—</TableCell>
+              </TableRow>
+            ) : null}
             {filtered.map((r) => (
               <TableRow key={r.id} className="border-b border-slate-300/80 bg-white/60">
                 <TableCell className="font-semibold text-slate-800">{r.transactionDate}</TableCell>
@@ -367,7 +403,7 @@ export function BankTransactionsView({
                   </div>
                 </TableCell>
                 <TableCell className="align-top whitespace-nowrap">
-                  {r.kind === "cash" ? (
+                  {r.kind === "cash" && !isBankOpeningBalanceLine(r) ? (
                     <div className="flex flex-wrap gap-1">
                       <button
                         type="button"
@@ -392,7 +428,7 @@ export function BankTransactionsView({
                 </TableCell>
               </TableRow>
             ))}
-            {filtered.length === 0 ? (
+            {filtered.length === 0 && !openingRow ? (
               <TableRow>
                 <TableCell colSpan={6} className="py-10 text-center font-bold text-slate-500">
                   該当する入出金がありません
