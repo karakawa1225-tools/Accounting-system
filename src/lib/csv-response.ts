@@ -1,3 +1,15 @@
+/** Content-Disposition（ASCII fallback + UTF-8 filename*） */
+function buildContentDisposition(filename: string): string {
+  const ascii =
+    filename
+      .replace(/[^\x20-\x7E]/g, "_")
+      .replace(/["\\]/g, "_")
+      .replace(/_+/g, "_")
+      .replace(/^_|_$/g, "") || "export.csv";
+  const utf8 = encodeURIComponent(filename);
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${utf8}`;
+}
+
 /** UTF-8 BOM 付き CSV をブラウザダウンロード用 Response で返す */
 export function csvDownloadResponse(filename: string, headers: string[], rows: string[][]) {
   const escape = (v: string) => {
@@ -9,7 +21,7 @@ export function csvDownloadResponse(filename: string, headers: string[], rows: s
   return new Response(body, {
     headers: {
       "Content-Type": "text/csv; charset=utf-8",
-      "Content-Disposition": `attachment; filename="${filename}"`,
+      "Content-Disposition": buildContentDisposition(filename),
     },
   });
 }
