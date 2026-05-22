@@ -7,6 +7,8 @@ import { AP_BOOKS, type ApBook, parseApBook } from "@/lib/ar-ap-books";
 import { getApRecentLines, getPayableBalances } from "../actions";
 import { PayablesView } from "../view";
 
+export const dynamic = "force-dynamic";
+
 export default async function PayablesBookPage({ params }: { params: Promise<{ book: string }> }) {
   const { book: raw } = await params;
   if (!AP_BOOKS.includes(raw as ApBook)) notFound();

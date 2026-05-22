@@ -73,6 +73,7 @@ export function PayablesView({
     transactionDate: string;
     vendorName: string | null;
     kind: string;
+    kindLabel: string;
     amountMinor: number;
     summary: string | null;
     purchaseAllocationLocked: boolean;
@@ -108,8 +109,7 @@ export function PayablesView({
   const filteredRecentLines = useMemo(() => {
     if (!historySearch.trim()) return recentLines;
     return recentLines.filter((r) => {
-      const kind = r.kind === "ap_purchase" ? purchaseLabel : "支払";
-      const hay = [r.transactionDate, kind, r.vendorName ?? "", r.summary ?? "", String(r.amountMinor), yen(r.amountMinor)].join(" ");
+      const hay = [r.transactionDate, r.kindLabel, r.vendorName ?? "", r.summary ?? "", String(r.amountMinor), yen(r.amountMinor)].join(" ");
       return matchesListSearch(hay, historySearch);
     });
   }, [recentLines, historySearch, purchaseLabel]);
@@ -341,7 +341,7 @@ export function PayablesView({
 
       <section style={card}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <h3 className="m-0 text-xl font-extrabold tracking-[0.06em]">買掛登録履歴</h3>
+          <h3 className="m-0 text-xl font-extrabold tracking-[0.06em]">{AP_BOOK_LABELS[book]} 登録履歴</h3>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <input style={inp} type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
             <MonthlyExportLinks
@@ -389,7 +389,7 @@ export function PayablesView({
               {filteredRecentLines.map((r) => (
                 <tr key={r.id} style={{ borderTop: "1px solid #f1f5f9" }}>
                   <td style={{ padding: 8 }}>{r.transactionDate}</td>
-                  <td style={{ padding: 8 }}>{r.kind === "ap_purchase" ? purchaseLabel : "支払"}</td>
+                  <td style={{ padding: 8 }}>{r.kindLabel}</td>
                   <td style={{ padding: 8 }}>{r.vendorName ?? "—"}</td>
                   <td style={{ padding: 8, textAlign: "right" }}>{yen(r.amountMinor)}</td>
                   <td style={{ padding: 8 }}>{r.summary ?? "—"}</td>
@@ -402,7 +402,7 @@ export function PayablesView({
                       style={btnDanger}
                       disabled={pending}
                       onClick={() => {
-                        if (!window.confirm(`${r.kind === "ap_purchase" ? purchaseLabel : "支払"} の履歴を削除しますか？関連する仕訳もまとめて削除されます。`)) return;
+                        if (!window.confirm(`${r.kindLabel} の履歴を削除しますか？関連する仕訳もまとめて削除されます。`)) return;
                         startTransition(() =>
                           void deleteApHistoryLine(r.id, book)
                             .then(() => {

@@ -75,10 +75,12 @@ export async function getApRecentLines(book: ApBook, limit = 120) {
     )
     .orderBy(asc(transactions.transactionDate), asc(transactions.createdAt))
     .limit(limit);
+  const purchaseLabel = apPurchaseKindLabel(book);
   return rows.map((r) => {
     const { allocationCount, debitAmountMinor, creditAmountMinor, ...rest } = r;
     return {
       ...rest,
+      kindLabel: r.kind === "ap_purchase" ? purchaseLabel : "支払",
       amountMinor: r.kind === "ap_purchase" ? creditAmountMinor : debitAmountMinor,
       purchaseAllocationLocked: r.kind === "ap_purchase" ? allocationCount > 0 : false,
     };
