@@ -18,6 +18,16 @@ export const AP_BOOK_LABELS: Record<ApBook, string> = {
   gaichu: "外注費",
 };
 
+/** 買掛履歴・月次 PDF の ap_purchase 区分表示名 */
+export function apPurchaseKindLabel(book: ApBook): string {
+  return book === "gaichu" ? "外注費" : "仕入";
+}
+
+/** 月次 PDF フッタの登録合計ラベル */
+export function apPurchaseTotalLabel(book: ApBook): string {
+  return book === "gaichu" ? "外注費合計" : "仕入合計";
+}
+
 /** 売掛管理画面のクエリ名（部署） */
 export const AR_DEPT_QUERY = "dept";
 

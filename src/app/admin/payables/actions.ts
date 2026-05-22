@@ -11,6 +11,7 @@ import {
 } from "@/lib/payment-transfer-fee";
 import {
   type ApBook,
+  apPurchaseKindLabel,
   apRevalidatePaths,
   parseApBook,
   resolveApAccounts,
@@ -239,7 +240,7 @@ export async function getMonthlyApLedgerForPdf(month: string, book: ApBook) {
     return {
       id: r.id,
       transactionDate: r.transactionDate,
-      kindLabel: isPurchase ? (book === "gaichu" ? "外注" : "仕入") : "支払",
+      kindLabel: isPurchase ? apPurchaseKindLabel(book) : "支払",
       partyName: r.vendorName ?? "",
       amountMinor,
       summary: r.summary,

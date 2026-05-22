@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useRef, useState, useTransition } from "react";
 import { MonthlyExportLinks } from "@/components/monthly-export-links";
-import { AP_BOOK_LABELS, AP_BOOKS, type ApBook, apAdminPath } from "@/lib/ar-ap-books";
+import { AP_BOOK_LABELS, AP_BOOKS, type ApBook, apAdminPath, apPurchaseKindLabel } from "@/lib/ar-ap-books";
 import { FiscalPeriodInlineTable } from "@/lib/fiscal-period-ui";
 import { matchesListSearch } from "@/lib/list-search";
 import { apAllocationTargetMinor, type TransferFeeBearer } from "@/lib/payment-transfer-fee";
@@ -79,6 +79,7 @@ export function PayablesView({
   }[];
 }) {
   const router = useRouter();
+  const purchaseLabel = apPurchaseKindLabel(book);
   const [pending, startTransition] = useTransition();
   const [msg, setMsg] = useState("");
   const [amountExcl, setAmountExcl] = useState("");
@@ -107,12 +108,11 @@ export function PayablesView({
   const filteredRecentLines = useMemo(() => {
     if (!historySearch.trim()) return recentLines;
     return recentLines.filter((r) => {
-      const purchaseLabel = book === "gaichu" ? "外注" : "仕入";
       const kind = r.kind === "ap_purchase" ? purchaseLabel : "支払";
       const hay = [r.transactionDate, kind, r.vendorName ?? "", r.summary ?? "", String(r.amountMinor), yen(r.amountMinor)].join(" ");
       return matchesListSearch(hay, historySearch);
     });
-  }, [recentLines, historySearch, book]);
+  }, [recentLines, historySearch, purchaseLabel]);
 
   const editRef = useRef<HTMLDialogElement>(null);
   const [editLineId, setEditLineId] = useState("");
@@ -263,7 +263,7 @@ export function PayablesView({
         action={(fd) =>
           startTransition(() =>
             void registerApPurchase(fd)
-              .then(() => setMsg("仕入を登録しました"))
+              .then(() => setMsg(`${purchaseLabel}を登録しました`))
               .catch((e) => setMsg(e?.message ?? "登録に失敗しました"))
           )
         }
@@ -368,7 +368,7 @@ export function PayablesView({
             style={inp}
             value={historySearch}
             onChange={(e) => setHistorySearch(e.target.value)}
-            placeholder="例: 仕入 / 2025"
+            placeholder={`例: ${purchaseLabel} / 2025`}
             autoComplete="off"
             spellCheck={false}
           />
@@ -389,7 +389,7 @@ export function PayablesView({
               {filteredRecentLines.map((r) => (
                 <tr key={r.id} style={{ borderTop: "1px solid #f1f5f9" }}>
                   <td style={{ padding: 8 }}>{r.transactionDate}</td>
-                  <td style={{ padding: 8 }}>{r.kind === "ap_purchase" ? "仕入" : "支払"}</td>
+                  <td style={{ padding: 8 }}>{r.kind === "ap_purchase" ? purchaseLabel : "支払"}</td>
                   <td style={{ padding: 8 }}>{r.vendorName ?? "—"}</td>
                   <td style={{ padding: 8, textAlign: "right" }}>{yen(r.amountMinor)}</td>
                   <td style={{ padding: 8 }}>{r.summary ?? "—"}</td>
@@ -402,7 +402,7 @@ export function PayablesView({
                       style={btnDanger}
                       disabled={pending}
                       onClick={() => {
-                        if (!window.confirm(`${r.kind === "ap_purchase" ? "仕入" : "支払"} の履歴を削除しますか？関連する仕訳もまとめて削除されます。`)) return;
+                        if (!window.confirm(`${r.kind === "ap_purchase" ? purchaseLabel : "支払"} の履歴を削除しますか？関連する仕訳もまとめて削除されます。`)) return;
                         startTransition(() =>
                           void deleteApHistoryLine(r.id, book)
                             .then(() => {
@@ -436,8 +436,8 @@ export function PayablesView({
           <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "#475569" }}>
             {editKind === "ap_purchase"
               ? editPurchaseAllocationLocked
-                ? "消込済みの仕入は日付・摘要のみ変更できます。金額・仕入先を直す場合は支払側を削除してからやり直してください。"
-                : "仕入の日付・仕入先・税込金額・摘要を変更します（複式の相手勘定にも反映されます）。"
+                ? `消込済みの${purchaseLabel}は日付・摘要のみ変更できます。金額・仕入先を直す場合は支払側を削除してからやり直してください。`
+                : `${purchaseLabel}の日付・仕入先・税込金額・摘要を変更します（複式の相手勘定にも反映されます）。`
               : "支払の日付・摘要のみ変更できます。金額・消込内容を変える場合は一度削除して登録し直してください。"}
           </p>
           <label style={{ display: "grid", gap: 6, fontSize: 16, fontWeight: 700, letterSpacing: "0.05em" }}>
@@ -614,7 +614,11 @@ export function PayablesView({
                 {openLines.length === 0 ? (
                   <tr>
                     <td colSpan={4} style={{ padding: 12, color: "#64748b" }}>
-                      {payVendorId ? "未払の買掛行がありません" : "仕入先を選択してください"}
+                      {payVendorId
+                        ? book === "gaichu"
+                          ? "未払の外注費行がありません"
+                          : "未払の買掛行がありません"
+                        : "仕入先を選択してください"}
                     </td>
                   </tr>
                 ) : (

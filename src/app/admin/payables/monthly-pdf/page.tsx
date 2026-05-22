@@ -1,4 +1,4 @@
-import { AP_BOOK_LABELS, parseApBook, apAdminPath } from "@/lib/ar-ap-books";
+import { AP_BOOK_LABELS, apPurchaseTotalLabel, parseApBook, apAdminPath } from "@/lib/ar-ap-books";
 import { ArApMonthlyPdfDocument } from "@/components/ar-ap-monthly-pdf-document";
 import { getMonthlyApLedgerForPdf } from "../actions";
 
@@ -14,7 +14,7 @@ export default async function PayablesMonthlyPdfPage({
   const book = parseApBook(p.book);
   const report = await getMonthlyApLedgerForPdf(month, book);
 
-  const purchaseLabel = book === "gaichu" ? "外注合計" : "仕入合計";
+  const purchaseLabel = apPurchaseTotalLabel(book);
 
   return (
     <ArApMonthlyPdfDocument
