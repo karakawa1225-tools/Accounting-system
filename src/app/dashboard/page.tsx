@@ -3,6 +3,11 @@ import { cookies } from "next/headers";
 import { sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { accounts, customers, transactions, vendors } from "@/db/schema";
+import {
+  currentMonthYmJst,
+  sumMonthlyApPurchaseMinor,
+  sumMonthlyArSalesMinor,
+} from "@/lib/dashboard-metrics";
 import { getSystemAccounts } from "@/lib/system-accounts";
 import { sessionCookieName, verifySessionToken } from "@/lib/session";
 
@@ -40,37 +45,17 @@ export default async function DashboardPage() {
       .where(sql`${transactions.accountId} = ${accountId}`)
       .then(([r]) => r?.v ?? 0);
 
-  const monthExpenseSum = (accountId: string) =>
-    db
-      .select({
-        v: sql<number>`coalesce(sum(${transactions.debitAmountMinor}),0)`.mapWith(Number),
-      })
-      .from(transactions)
-      .where(
-        sql`${transactions.accountId} = ${accountId} and substr(${transactions.transactionDate},1,7) = strftime('%Y-%m','now','localtime')`
-      )
-      .then(([r]) => r?.v ?? 0);
-
-  const monthRevenueSum = (accountId: string) =>
-    db
-      .select({
-        v: sql<number>`coalesce(sum(${transactions.creditAmountMinor}),0)`.mapWith(Number),
-      })
-      .from(transactions)
-      .where(
-        sql`${transactions.accountId} = ${accountId} and substr(${transactions.transactionDate},1,7) = strftime('%Y-%m','now','localtime')`
-      )
-      .then(([r]) => r?.v ?? 0);
+  const monthYm = currentMonthYmJst();
 
   const [arSeko, arKiko, apKaikake, apGaichu, salesSeko, salesKiko, purchaseMonth, outsourceMonth] = await Promise.all([
     balanceSum(sys.arId),
     balanceSum(sys.arKikoId),
     balanceSum(sys.apId, true),
     balanceSum(sys.apOutsourceId, true),
-    monthRevenueSum(sys.salesId),
-    monthRevenueSum(sys.salesKikoId),
-    monthExpenseSum(sys.purchasesId),
-    monthExpenseSum(sys.outsourceExpenseId),
+    sumMonthlyArSalesMinor(db, sys, "seko", monthYm),
+    sumMonthlyArSalesMinor(db, sys, "kiko", monthYm),
+    sumMonthlyApPurchaseMinor(db, sys, "kaikake", monthYm),
+    sumMonthlyApPurchaseMinor(db, sys, "gaichu", monthYm),
   ]);
 
   const metricCards = [
@@ -78,10 +63,10 @@ export default async function DashboardPage() {
     { label: "売掛（機工部）", value: yen(arKiko), tone: "from-teal-600/25 to-cyan-600/10" },
     { label: "買掛金", value: yen(apKaikake), tone: "from-blue-700/25 to-indigo-600/10" },
     { label: "外注費（未払）", value: yen(apGaichu), tone: "from-indigo-600/25 to-violet-600/10" },
-    { label: "当月売上（施工）", value: yen(salesSeko), tone: "from-emerald-500/25 to-cyan-600/10" },
-    { label: "当月売上（機工）", value: yen(salesKiko), tone: "from-lime-500/25 to-emerald-600/10" },
-    { label: "当月仕入", value: yen(purchaseMonth), tone: "from-violet-500/25 to-blue-700/10" },
-    { label: "当月外注費", value: yen(outsourceMonth), tone: "from-purple-500/25 to-indigo-700/10" },
+    { label: `当月売上（施工） ${monthYm}`, value: yen(salesSeko), tone: "from-emerald-500/25 to-cyan-600/10" },
+    { label: `当月売上（機工） ${monthYm}`, value: yen(salesKiko), tone: "from-lime-500/25 to-emerald-600/10" },
+    { label: `当月仕入 ${monthYm}`, value: yen(purchaseMonth), tone: "from-violet-500/25 to-blue-700/10" },
+    { label: `当月外注費 ${monthYm}`, value: yen(outsourceMonth), tone: "from-purple-500/25 to-indigo-700/10" },
   ];
 
   const masterCards = [
