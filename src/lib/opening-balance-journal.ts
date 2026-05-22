@@ -1,9 +1,10 @@
 import { and, asc, eq, inArray, isNotNull, isNull, ne, or } from "drizzle-orm";
 import type { Database } from "@/db";
 import { accounts, openingBalanceLines, transactions } from "@/db/schema";
+import { OPENING_JOURNAL_SUMMARY } from "@/lib/opening-balance-constants";
 import { getSystemAccounts } from "@/lib/system-accounts";
 
-export const OPENING_JOURNAL_SUMMARY = "[期首残高]";
+export { OPENING_JOURNAL_SUMMARY };
 
 /** 期首残高行から仕訳を再生成する（全会計期間開始日分を一括置換） */
 export async function regenerateOpeningJournalForFiscal(db: Database, fiscalPeriodStart: string) {
