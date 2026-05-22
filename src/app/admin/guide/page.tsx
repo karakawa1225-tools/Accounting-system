@@ -82,7 +82,7 @@ export default function GuidePage() {
           <FlowStep n={4} title="日次処理" body="売掛・買掛・入出金を記録し、ダッシュボードで残高を確認します。" />
         </ol>
         <pre className="mt-6 overflow-x-auto rounded-xl bg-slate-100 p-4 text-xs font-bold text-slate-700">
-{`会計設定 → マスタ(CSV可) → 期首残高 → 売掛(施工/機工)・買掛(買掛金/外注)・入出金 → 月次PDF・CSV`}
+{`会計設定 → マスタ(CSV可) → 期首残高 → 売掛(部署選択)・買掛(買掛金/外注)・入出金 → 月次PDF・CSV`}
         </pre>
       </section>
 
@@ -100,21 +100,12 @@ export default function GuidePage() {
         />
         <ScreenCard
           icon="📥"
-          title="売掛管理（施工部）"
-          href="/admin/receivables/seko"
+          title="売掛管理"
+          href="/admin/receivables"
           steps={[
-            "施工部の売上・入金消込専用画面です（勘定: 売掛金・売上高 施工部）。",
-            "従来の売掛データはこちらに引き続き表示されます。",
-            "月別入金 PDF / CSV も施工部のみ出力します。",
-          ]}
-        />
-        <ScreenCard
-          icon="📥"
-          title="売掛管理（機工部）"
-          href="/admin/receivables/kiko"
-          steps={[
-            "機工部の売上・入金消込専用です（勘定: 売掛金・売上高 機工部）。",
-            "画面上部のタブで施工部と切り替えできます。",
+            "画面上部の「部署」で施工部または機工部を選んでから売上登録・入金消込を行います。",
+            "従来の売掛データは施工部に表示されます。機工部は別勘定に計上されます。",
+            "月次明細 PDF / 入金 CSV は選択中の部署のみ対象です。",
           ]}
         />
         <ScreenCard

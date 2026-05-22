@@ -18,6 +18,9 @@ export const AP_BOOK_LABELS: Record<ApBook, string> = {
   gaichu: "外注費",
 };
 
+/** 売掛管理画面のクエリ名（部署） */
+export const AR_DEPT_QUERY = "dept";
+
 export function parseArBook(raw: string | null | undefined): ArBook {
   return raw === "kiko" ? "kiko" : "seko";
 }
@@ -27,7 +30,7 @@ export function parseApBook(raw: string | null | undefined): ApBook {
 }
 
 export function arAdminPath(book: ArBook) {
-  return `/admin/receivables/${book}`;
+  return `/admin/receivables?${AR_DEPT_QUERY}=${book}`;
 }
 
 export function apAdminPath(book: ApBook) {

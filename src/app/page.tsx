@@ -91,7 +91,7 @@ export default async function HomePage() {
             href: "/admin/csv-guide",
             adminOnly: false,
           },
-          { t: "売掛 / 買掛", d: "施工部・機工部、買掛金・外注費ごとに分けて管理。", href: "/admin/receivables/seko", adminOnly: false },
+          { t: "売掛 / 買掛", d: "売掛は部署選択、買掛は買掛金・外注費で管理。", href: "/admin/receivables", adminOnly: false },
           { t: "自社・銀行", d: "会社情報・会計期間・自社口座を管理者が保存。", href: "/admin/company", adminOnly: true },
         ]
           .filter((item) => !item.adminOnly || isAdmin)

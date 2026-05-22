@@ -105,11 +105,8 @@ export default async function DashboardPage() {
             <Link className="rounded-md border border-teal-300/50 bg-teal-500/10 px-3 py-2 hover:bg-teal-400/20" href="/admin/csv-guide">
               CSVガイド
             </Link>
-            <Link className="rounded-md border border-sky-300/50 bg-sky-500/10 px-3 py-2 hover:bg-sky-400/20" href="/admin/receivables/seko">
-              AR 施工
-            </Link>
-            <Link className="rounded-md border border-teal-300/50 bg-teal-500/10 px-3 py-2 hover:bg-teal-400/20" href="/admin/receivables/kiko">
-              AR 機工
+            <Link className="rounded-md border border-sky-300/50 bg-sky-500/10 px-3 py-2 hover:bg-sky-400/20" href="/admin/receivables">
+              RECEIVABLES
             </Link>
             <Link className="rounded-md border border-blue-300/50 bg-blue-500/10 px-3 py-2 hover:bg-blue-400/20" href="/admin/payables/kaikake">
               AP 買掛
