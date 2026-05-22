@@ -2,9 +2,13 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 import { sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { accounts, customers, transactions, vendors } from "@/db/schema";
+import { accounts, customers, vendors } from "@/db/schema";
 import {
   currentMonthYmJst,
+  listArBookLedgerRows,
+  listArOrphanLedgerRows,
+  sumApBookBalanceMinor,
+  sumArBookBalanceMinor,
   sumMonthlyApPurchaseMinor,
   sumMonthlyArSalesMinor,
 } from "@/lib/dashboard-metrics";
@@ -32,31 +36,21 @@ export default async function DashboardPage() {
     db.select({ c: sql<number>`count(*)`.mapWith(Number) }).from(vendors),
   ]);
 
-  const balanceSum = (accountId: string, liability = false) =>
-    db
-      .select({
-        v: sql<number>`coalesce(sum(${
-          liability
-            ? sql`${transactions.creditAmountMinor} - ${transactions.debitAmountMinor}`
-            : sql`${transactions.debitAmountMinor} - ${transactions.creditAmountMinor}`
-        }),0)`.mapWith(Number),
-      })
-      .from(transactions)
-      .where(sql`${transactions.accountId} = ${accountId}`)
-      .then(([r]) => r?.v ?? 0);
-
   const monthYm = currentMonthYmJst();
 
-  const [arSeko, arKiko, apKaikake, apGaichu, salesSeko, salesKiko, purchaseMonth, outsourceMonth] = await Promise.all([
-    balanceSum(sys.arId),
-    balanceSum(sys.arKikoId),
-    balanceSum(sys.apId, true),
-    balanceSum(sys.apOutsourceId, true),
-    sumMonthlyArSalesMinor(db, sys, "seko", monthYm),
-    sumMonthlyArSalesMinor(db, sys, "kiko", monthYm),
-    sumMonthlyApPurchaseMinor(db, sys, "kaikake", monthYm),
-    sumMonthlyApPurchaseMinor(db, sys, "gaichu", monthYm),
-  ]);
+  const [arSeko, arKiko, apKaikake, apGaichu, salesSeko, salesKiko, purchaseMonth, outsourceMonth, sekoLedger, sekoOrphans] =
+    await Promise.all([
+      sumArBookBalanceMinor(db, sys, "seko"),
+      sumArBookBalanceMinor(db, sys, "kiko"),
+      sumApBookBalanceMinor(db, sys, "kaikake"),
+      sumApBookBalanceMinor(db, sys, "gaichu"),
+      sumMonthlyArSalesMinor(db, sys, "seko", monthYm),
+      sumMonthlyArSalesMinor(db, sys, "kiko", monthYm),
+      sumMonthlyApPurchaseMinor(db, sys, "kaikake", monthYm),
+      sumMonthlyApPurchaseMinor(db, sys, "gaichu", monthYm),
+      listArBookLedgerRows(db, sys, "seko"),
+      listArOrphanLedgerRows(db, sys, "seko"),
+    ]);
 
   const metricCards = [
     { label: "売掛（施工部）", value: yen(arSeko), tone: "from-cyan-600/25 to-sky-600/10" },
@@ -115,6 +109,62 @@ export default async function DashboardPage() {
             <p className="mt-3 text-2xl font-black tracking-[0.08em] text-slate-900">{m.value}</p>
           </article>
         ))}
+      </section>
+
+      <section className="rounded-xl border border-slate-300 bg-white p-4 shadow-sm">
+        <h2 className="text-lg font-black tracking-[0.08em] text-slate-900">
+          施工部 売掛明細（日付昇順）
+        </h2>
+        <p className="mt-1 text-sm font-semibold text-slate-600">
+          売掛残高 {yen(arSeko)} ＝ 売上・入金消込のみ。入出金画面の cash が売掛勘定に付いていると残高から差し引かれます。
+        </p>
+        {sekoOrphans.length > 0 ? (
+          <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-bold text-amber-900">
+            売掛勘定に売掛管理外の仕訳が {sekoOrphans.length} 件あります。旧表示では入金
+            {yen(
+              sekoOrphans.reduce((s, r) => s + Number(r.creditAmountMinor ?? 0), 0)
+            )}
+            分が残高から引かれていました。例: {String(sekoOrphans[0].transactionDate)}{" "}
+            {String(sekoOrphans[0].kind)} {String(sekoOrphans[0].summary ?? "")}
+          </div>
+        ) : null}
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full border-collapse text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 text-left">
+                <th className="px-2 py-2 font-bold text-slate-600">日付</th>
+                <th className="px-2 py-2 font-bold text-slate-600">区分</th>
+                <th className="px-2 py-2 font-bold text-slate-600">顧客</th>
+                <th className="px-2 py-2 text-right font-bold text-slate-600">金額</th>
+                <th className="px-2 py-2 font-bold text-slate-600">摘要</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sekoLedger.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="px-2 py-3 text-slate-500">
+                    明細なし
+                  </td>
+                </tr>
+              ) : (
+                sekoLedger.map((r, i) => (
+                  <tr key={`${r.transactionDate}-${r.kind}-${i}`} className="border-t border-slate-100">
+                    <td className="whitespace-nowrap px-2 py-2">{r.transactionDate}</td>
+                    <td className="px-2 py-2">{r.kindLabel}</td>
+                    <td className="px-2 py-2">{r.customerName ?? "—"}</td>
+                    <td
+                      className={`px-2 py-2 text-right font-semibold tabular-nums ${r.flow === "in" ? "text-cyan-800" : "text-rose-700"}`}
+                    >
+                      {r.flow === "in" ? "+" : "−"}
+                      {yen(r.amountMinor)}
+                    </td>
+                    <td className="px-2 py-2">{r.summary ?? "—"}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <section className="grid gap-4 lg:grid-cols-3">

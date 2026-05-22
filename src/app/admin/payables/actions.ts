@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { and, asc, desc, eq, gt, isNotNull, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNotNull, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { apAllocations, transactions, vendors } from "@/db/schema";
 import {
@@ -72,7 +72,7 @@ export async function getApRecentLines(book: ApBook, limit = 120) {
         sql`${transactions.kind} in ('ap_purchase','ap_payment')`
       )
     )
-    .orderBy(desc(transactions.transactionDate), desc(transactions.createdAt))
+    .orderBy(asc(transactions.transactionDate), asc(transactions.createdAt))
     .limit(limit);
   return rows.map((r) => {
     const { allocationCount, debitAmountMinor, creditAmountMinor, ...rest } = r;
@@ -292,7 +292,13 @@ export async function getPayableBalances(book: ApBook) {
       balance: sql<number>`coalesce(sum(${transactions.creditAmountMinor} - ${transactions.debitAmountMinor}),0)`,
     })
     .from(transactions)
-    .where(and(eq(transactions.accountId, apId), isNotNull(transactions.vendorId)))
+    .where(
+      and(
+        eq(transactions.accountId, apId),
+        isNotNull(transactions.vendorId),
+        inArray(transactions.kind, ["ap_purchase", "ap_payment"])
+      )
+    )
     .groupBy(transactions.vendorId);
   const map = new Map(rows.map((r) => [r.vendorId, Number(r.balance)]));
   return allVendors.map((v) => ({ id: v.id, name: v.name, balanceMinor: map.get(v.id) ?? 0 }));

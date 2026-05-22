@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { and, asc, desc, eq, gt, isNotNull, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNotNull, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { arAllocations, customers, transactions } from "@/db/schema";
 import {
@@ -78,7 +78,7 @@ export async function getArRecentLines(book: ArBook, limit = 120) {
         sql`${transactions.kind} in ('ar_sale','ar_payment')`
       )
     )
-    .orderBy(desc(transactions.transactionDate), desc(transactions.createdAt))
+    .orderBy(asc(transactions.transactionDate), asc(transactions.createdAt))
     .limit(limit);
   return rows.map((r) => {
     const { allocationCount, debitAmountMinor, creditAmountMinor, ...rest } = r;
@@ -96,9 +96,9 @@ export async function getArRecentLinesMerged(limit = 120) {
   const [seko, kiko] = await Promise.all([getArRecentLines("seko", perBook), getArRecentLines("kiko", perBook)]);
   return [...seko, ...kiko]
     .sort((a, b) => {
-      const d = b.transactionDate.localeCompare(a.transactionDate);
+      const d = a.transactionDate.localeCompare(b.transactionDate);
       if (d !== 0) return d;
-      return (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0);
+      return (a.createdAt?.getTime() ?? 0) - (b.createdAt?.getTime() ?? 0);
     })
     .slice(0, limit);
 }
@@ -314,7 +314,13 @@ export async function getReceivableBalances(book: ArBook) {
       balance: sql<number>`coalesce(sum(${transactions.debitAmountMinor} - ${transactions.creditAmountMinor}),0)`,
     })
     .from(transactions)
-    .where(and(eq(transactions.accountId, arId), isNotNull(transactions.customerId)))
+    .where(
+      and(
+        eq(transactions.accountId, arId),
+        isNotNull(transactions.customerId),
+        inArray(transactions.kind, ["ar_sale", "ar_payment"])
+      )
+    )
     .groupBy(transactions.customerId);
   const map = new Map(rows.map((r) => [r.customerId, Number(r.balance)]));
   return allCustomers.map((c) => ({ id: c.id, name: c.name, balanceMinor: map.get(c.id) ?? 0 }));
