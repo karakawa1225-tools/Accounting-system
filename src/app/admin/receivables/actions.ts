@@ -13,13 +13,19 @@ import {
   type ArBook,
   arRevalidatePaths,
   parseArBook,
+  revalidateAllArPaths,
   resolveArAccounts,
+  resolveArBookFromArAccountId,
 } from "@/lib/ar-ap-books";
 import { getSystemAccounts } from "@/lib/system-accounts";
 import { transactionDateInMonth } from "@/lib/transaction-month-filter";
 
 function revalidateAr(book: ArBook) {
   for (const p of arRevalidatePaths(book)) revalidatePath(p);
+}
+
+function revalidateArMany(books: ArBook[]) {
+  for (const p of revalidateAllArPaths(books)) revalidatePath(p);
 }
 
 export async function registerArSale(formData: FormData) {
@@ -78,18 +84,42 @@ export async function getArRecentLines(book: ArBook, limit = 120) {
     const { allocationCount, debitAmountMinor, creditAmountMinor, ...rest } = r;
     return {
       ...rest,
+      book,
       amountMinor: r.kind === "ar_sale" ? debitAmountMinor : creditAmountMinor,
       saleAllocationLocked: r.kind === "ar_sale" ? allocationCount > 0 : false,
     };
   });
 }
 
-export async function deleteArHistoryLine(transactionId: string, book: ArBook) {
+export async function getArRecentLinesMerged(limit = 120) {
+  const perBook = Math.ceil(limit / 2);
+  const [seko, kiko] = await Promise.all([getArRecentLines("seko", perBook), getArRecentLines("kiko", perBook)]);
+  return [...seko, ...kiko]
+    .sort((a, b) => {
+      const d = b.transactionDate.localeCompare(a.transactionDate);
+      if (d !== 0) return d;
+      return (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0);
+    })
+    .slice(0, limit);
+}
+
+export async function getReceivableBalancesMerged() {
+  const [seko, kiko] = await Promise.all([getReceivableBalances("seko"), getReceivableBalances("kiko")]);
+  const rows = [
+    ...seko.map((b) => ({ ...b, book: "seko" as const })),
+    ...kiko.map((b) => ({ ...b, book: "kiko" as const })),
+  ].filter((b) => b.balanceMinor !== 0);
+  rows.sort((a, b) => a.name.localeCompare(b.name, "ja") || a.book.localeCompare(b.book));
+  return rows;
+}
+
+export async function deleteArHistoryLine(transactionId: string) {
   const db = getDb();
   const sys = await getSystemAccounts(db);
-  const { arId } = resolveArAccounts(sys, book);
   const [row] = await db.select().from(transactions).where(eq(transactions.id, transactionId)).limit(1);
-  if (!row || row.accountId !== arId || !row.entryGroupId) throw new Error("対象の売掛履歴が見つかりません");
+  const book = row ? resolveArBookFromArAccountId(sys, row.accountId) : null;
+  const { arId } = book ? resolveArAccounts(sys, book) : { arId: "" };
+  if (!row || !book || row.accountId !== arId || !row.entryGroupId) throw new Error("対象の売掛履歴が見つかりません");
 
   if (row.kind === "ar_sale") {
     if (row.debitAmountMinor <= 0) throw new Error("売上行の形式が不正です");
@@ -109,14 +139,25 @@ export async function deleteArHistoryLine(transactionId: string, book: ArBook) {
 
 export async function updateArHistoryLine(
   transactionId: string,
-  book: ArBook,
-  input: { transactionDate: string; summary: string | null; amountMinor?: number; customerId?: string }
+  input: {
+    transactionDate: string;
+    summary: string | null;
+    amountMinor?: number;
+    customerId?: string;
+    book?: ArBook;
+  }
 ) {
   const db = getDb();
   const sys = await getSystemAccounts(db);
-  const { arId, salesId } = resolveArAccounts(sys, book);
   const [row] = await db.select().from(transactions).where(eq(transactions.id, transactionId)).limit(1);
-  if (!row || row.accountId !== arId || !row.entryGroupId) throw new Error("対象の売掛履歴が見つかりません");
+  if (!row || !row.entryGroupId) throw new Error("対象の売掛履歴が見つかりません");
+
+  const currentBook = resolveArBookFromArAccountId(sys, row.accountId);
+  if (!currentBook) throw new Error("対象の売掛履歴が見つかりません");
+
+  const targetBook = input.book ? parseArBook(input.book) : currentBook;
+  const cur = resolveArAccounts(sys, currentBook);
+  const tgt = resolveArAccounts(sys, targetBook);
 
   const date = String(input.transactionDate ?? "").trim();
   if (!date) throw new Error("日付を入力してください");
@@ -124,13 +165,16 @@ export async function updateArHistoryLine(
   const eg = row.entryGroupId;
 
   if (row.kind === "ar_sale") {
+    if (row.accountId !== cur.arId) throw new Error("対象の売掛履歴が見つかりません");
+
     const [alloc] = await db.select().from(arAllocations).where(eq(arAllocations.salesArDebitTransactionId, transactionId)).limit(1);
     if (alloc) {
+      if (targetBook !== currentBook) throw new Error("消込済みの売上は部署を変更できません");
       await db
         .update(transactions)
         .set({ transactionDate: date, summary, updatedAt: new Date() })
         .where(eq(transactions.entryGroupId, eg));
-      revalidateAr(book);
+      revalidateAr(currentBook);
       return;
     }
 
@@ -145,35 +189,40 @@ export async function updateArHistoryLine(
         transactionDate: date,
         summary,
         customerId,
+        accountId: tgt.arId,
         debitAmountMinor: amount,
         creditAmountMinor: 0,
         amountMinor: amount,
         updatedAt: new Date(),
       })
-      .where(and(eq(transactions.entryGroupId, eg), eq(transactions.accountId, arId)));
+      .where(and(eq(transactions.entryGroupId, eg), eq(transactions.accountId, cur.arId)));
 
     await db
       .update(transactions)
       .set({
         transactionDate: date,
         summary,
+        accountId: tgt.salesId,
         debitAmountMinor: 0,
         creditAmountMinor: amount,
         amountMinor: amount,
         updatedAt: new Date(),
       })
-      .where(and(eq(transactions.entryGroupId, eg), eq(transactions.accountId, salesId)));
+      .where(and(eq(transactions.entryGroupId, eg), eq(transactions.accountId, cur.salesId)));
 
-    revalidateAr(book);
+    revalidateArMany([currentBook, targetBook]);
     return;
   }
 
   if (row.kind === "ar_payment") {
+    if (row.accountId !== cur.arId) throw new Error("対象の売掛履歴が見つかりません");
+    if (targetBook !== currentBook) throw new Error("入金の部署は変更できません（削除して登録し直してください）");
+
     await db
       .update(transactions)
       .set({ transactionDate: date, summary, updatedAt: new Date() })
       .where(eq(transactions.entryGroupId, eg));
-    revalidateAr(book);
+    revalidateAr(currentBook);
     return;
   }
 

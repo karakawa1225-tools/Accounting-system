@@ -61,6 +61,21 @@ export function resolveArAccounts(sys: SystemAccounts, book: ArBook) {
   return { arId: sys.arId, salesId: sys.salesId };
 }
 
+/** 売掛勘定IDから部署を判定（施工部＝従来の SYS_AR） */
+export function resolveArBookFromArAccountId(sys: SystemAccounts, accountId: string): ArBook | null {
+  if (accountId === sys.arKikoId) return "kiko";
+  if (accountId === sys.arId) return "seko";
+  return null;
+}
+
+export function revalidateAllArPaths(books: ArBook[]) {
+  const paths = new Set<string>();
+  for (const b of books) {
+    for (const p of arRevalidatePaths(b)) paths.add(p);
+  }
+  return [...paths];
+}
+
 export function resolveApAccounts(sys: SystemAccounts, book: ApBook) {
   if (book === "gaichu") {
     return { apId: sys.apOutsourceId, expenseId: sys.outsourceExpenseId };

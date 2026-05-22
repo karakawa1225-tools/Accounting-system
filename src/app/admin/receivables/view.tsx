@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useMemo, useRef, useState, useTransition } from "react";
 import { MonthlyExportLinks } from "@/components/monthly-export-links";
-import { AR_BOOK_LABELS, AR_BOOKS, type ArBook, arAdminPath, parseArBook } from "@/lib/ar-ap-books";
+import { AR_BOOK_LABELS, AR_BOOKS, type ArBook, parseArBook } from "@/lib/ar-ap-books";
 import { FiscalPeriodInlineTable } from "@/lib/fiscal-period-ui";
 import { matchesListSearch } from "@/lib/list-search";
 import { arAllocationTargetMinor, type TransferFeeBearer } from "@/lib/payment-transfer-fee";
@@ -54,20 +54,19 @@ function fifoAllocate(lines: ArOpenLine[], total: number): Record<string, number
 }
 
 export function ReceivablesView({
-  book,
   balances,
   customers,
   recentLines,
   fiscalStart,
   fiscalEnd,
 }: {
-  book: ArBook;
-  balances: { id: string; name: string; balanceMinor: number }[];
+  balances: { id: string; name: string; book: ArBook; balanceMinor: number }[];
   customers: { id: string; name: string; code: string | null }[];
   fiscalStart?: string | null;
   fiscalEnd?: string | null;
   recentLines: {
     id: string;
+    book: ArBook;
     customerId: string | null;
     transactionDate: string;
     customerName: string | null;
@@ -79,13 +78,8 @@ export function ReceivablesView({
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-
-  const switchDepartment = (next: ArBook) => {
-    if (next === book) return;
-    setMsg("");
-    router.push(arAdminPath(next));
-    router.refresh();
-  };
+  const [saleDept, setSaleDept] = useState<ArBook>("seko");
+  const [exportDept, setExportDept] = useState<ArBook>("seko");
   const [msg, setMsg] = useState("");
   const [amountExcl, setAmountExcl] = useState("");
   const [taxRate, setTaxRate] = useState("10");
@@ -107,14 +101,24 @@ export function ReceivablesView({
 
   const filteredBalances = useMemo(() => {
     if (!balanceSearch.trim()) return balances;
-    return balances.filter((b) => matchesListSearch(`${b.name} ${b.balanceMinor}`, balanceSearch));
+    return balances.filter((b) =>
+      matchesListSearch(`${b.name} ${AR_BOOK_LABELS[b.book]} ${b.balanceMinor}`, balanceSearch)
+    );
   }, [balances, balanceSearch]);
 
   const filteredRecentLines = useMemo(() => {
     if (!historySearch.trim()) return recentLines;
     return recentLines.filter((r) => {
       const kind = r.kind === "ar_sale" ? "売上" : "入金";
-      const hay = [r.transactionDate, kind, r.customerName ?? "", r.summary ?? "", String(r.amountMinor), yen(r.amountMinor)].join(" ");
+      const hay = [
+        r.transactionDate,
+        kind,
+        AR_BOOK_LABELS[r.book],
+        r.customerName ?? "",
+        r.summary ?? "",
+        String(r.amountMinor),
+        yen(r.amountMinor),
+      ].join(" ");
       return matchesListSearch(hay, historySearch);
     });
   }, [recentLines, historySearch]);
@@ -127,11 +131,13 @@ export function ReceivablesView({
   const [editAmount, setEditAmount] = useState("");
   const [editSummary, setEditSummary] = useState("");
   const [editSaleAllocationLocked, setEditSaleAllocationLocked] = useState(false);
+  const [editBook, setEditBook] = useState<ArBook>("seko");
 
   const openEditHistory = (r: (typeof recentLines)[number]) => {
     setMsg("");
     setEditLineId(r.id);
     setEditKind(r.kind);
+    setEditBook(r.book);
     setEditDate(r.transactionDate);
     setEditCustomerId(r.customerId ?? "");
     setEditAmount(String(r.amountMinor));
@@ -148,6 +154,7 @@ export function ReceivablesView({
           ? {
               transactionDate: editDate,
               summary: editSummary.trim() || null,
+              book: editBook,
               ...(editSaleAllocationLocked
                 ? {}
                 : {
@@ -156,7 +163,7 @@ export function ReceivablesView({
                   }),
             }
           : { transactionDate: editDate, summary: editSummary.trim() || null };
-      void updateArHistoryLine(editLineId, book, payload)
+      void updateArHistoryLine(editLineId, payload)
         .then(() => {
           setMsg("履歴を更新しました");
           editRef.current?.close();
@@ -166,14 +173,16 @@ export function ReceivablesView({
     });
   };
 
-  const loadOpen = (cid: string) => {
+  const [payBook, setPayBook] = useState<ArBook>("seko");
+
+  const loadOpen = (cid: string, dept: ArBook) => {
     if (!cid) {
       setOpenLines([]);
       setAlloc({});
       return;
     }
     startTransition(() =>
-      void getArOpenLines(cid, book)
+      void getArOpenLines(cid, dept)
         .then((lines) => {
           setOpenLines(lines);
           const sum = lines.reduce((s, l) => s + l.openMinor, 0);
@@ -199,11 +208,12 @@ export function ReceivablesView({
     [transferMinor, feeMinor, payFeeBearer]
   );
 
-  const openPayment = (customerId: string) => {
+  const openPayment = (customerId: string, dept: ArBook) => {
     setMsg("");
     setPayCustomerId(customerId);
+    setPayBook(dept);
     setPayDate(new Date().toISOString().slice(0, 10));
-    loadOpen(customerId);
+    loadOpen(customerId, dept);
     payRef.current?.showModal();
   };
 
@@ -220,7 +230,7 @@ export function ReceivablesView({
       .filter((a) => a.amountMinor > 0);
     startTransition(() =>
       void registerArPayment({
-        book,
+        book: payBook,
         customerId: payCustomerId,
         transactionDate: payDate,
         summary: paySummary.trim() || null,
@@ -244,31 +254,6 @@ export function ReceivablesView({
         <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: "0.04em", color: msg.includes("失敗") ? "#b91c1c" : "#15803d" }}>{msg}</div>
       ) : null}
 
-      <section style={{ ...card, display: "grid", gap: 8 }}>
-        <h3 className="m-0 text-xl font-extrabold tracking-[0.06em]">部署</h3>
-        <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "#64748b", letterSpacing: "0.04em" }}>
-          施工部・機工部を選んでから売上登録・入金消込を行います。選択した部署の売掛金・売上高に計上されます。
-        </p>
-        <label style={{ display: "grid", gap: 6, maxWidth: 320, fontSize: 15, fontWeight: 700, color: "#334155" }}>
-          担当部署
-          <select
-            style={inp}
-            value={book}
-            onChange={(e) => switchDepartment(parseArBook(e.target.value))}
-            aria-label="担当部署"
-          >
-            {AR_BOOKS.map((b) => (
-              <option key={b} value={b}>
-                {AR_BOOK_LABELS[b]}
-              </option>
-            ))}
-          </select>
-        </label>
-        <p style={{ margin: 0, fontSize: 14, fontWeight: 800, color: "#0e7490", letterSpacing: "0.06em" }}>
-          現在: {AR_BOOK_LABELS[book]} の売掛を表示・登録中
-        </p>
-      </section>
-
       <form
         action={(fd) =>
           startTransition(() =>
@@ -279,8 +264,23 @@ export function ReceivablesView({
         }
         style={{ ...card, display: "grid", gap: 8 }}
       >
-        <input type="hidden" name="book" value={book} />
         <h3 className="m-0 text-xl font-extrabold tracking-[0.06em]">売上登録</h3>
+        <label style={{ display: "grid", gap: 6, fontSize: 15, fontWeight: 700, color: "#334155" }}>
+          部署
+          <select
+            style={inp}
+            name="book"
+            value={saleDept}
+            onChange={(e) => setSaleDept(parseArBook(e.target.value))}
+            required
+          >
+            {AR_BOOKS.map((b) => (
+              <option key={b} value={b}>
+                {AR_BOOK_LABELS[b]}
+              </option>
+            ))}
+          </select>
+        </label>
         <select style={inp} name="customerId" required>
           {customers.map((c) => (
             <option key={c.id} value={c.id}>
@@ -303,7 +303,7 @@ export function ReceivablesView({
       </form>
 
       <section style={card}>
-        <h3 className="mt-0 text-xl font-extrabold tracking-[0.06em]">顧客別売掛残高（{AR_BOOK_LABELS[book]}）</h3>
+        <h3 className="mt-0 text-xl font-extrabold tracking-[0.06em]">顧客別売掛残高</h3>
         <label style={{ display: "grid", gap: 6, margin: "8px 0 10px", maxWidth: 440, fontSize: 14, fontWeight: 700, color: "#475569" }}>
           この一覧を検索（顧客名・金額の数字など）
           <input
@@ -321,17 +321,19 @@ export function ReceivablesView({
             <thead>
               <tr style={{ textAlign: "left", borderBottom: "1px solid #e2e8f0" }}>
                 <th style={{ padding: "10px 8px", color: "#64748b", fontWeight: 800, letterSpacing: "0.06em" }}>顧客</th>
+                <th style={{ padding: "10px 8px", color: "#64748b", fontWeight: 800, letterSpacing: "0.06em" }}>部署</th>
                 <th style={{ padding: "10px 8px", color: "#64748b", textAlign: "right", fontWeight: 800, letterSpacing: "0.06em" }}>残高</th>
                 <th style={{ padding: "10px 8px", width: 160, fontWeight: 800, letterSpacing: "0.06em" }}>操作</th>
               </tr>
             </thead>
             <tbody>
               {filteredBalances.map((b) => (
-                <tr key={b.id} style={{ borderTop: "1px solid #f1f5f9" }}>
+                <tr key={`${b.id}-${b.book}`} style={{ borderTop: "1px solid #f1f5f9" }}>
                   <td style={{ padding: "10px 8px" }}>{b.name}</td>
+                  <td style={{ padding: "10px 8px" }}>{AR_BOOK_LABELS[b.book]}</td>
                   <td style={{ padding: "10px 8px", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{yen(b.balanceMinor)}</td>
                   <td style={{ padding: "10px 8px" }}>
-                    <button type="button" style={btnGhost} disabled={pending || b.balanceMinor <= 0} onClick={() => openPayment(b.id)}>
+                    <button type="button" style={btnGhost} disabled={pending || b.balanceMinor <= 0} onClick={() => openPayment(b.id, b.book)}>
                       入金消込
                     </button>
                   </td>
@@ -339,7 +341,7 @@ export function ReceivablesView({
               ))}
               {filteredBalances.length === 0 ? (
                 <tr>
-                  <td colSpan={3} style={{ padding: 12, color: "#64748b", fontWeight: 700 }}>
+                  <td colSpan={4} style={{ padding: 12, color: "#64748b", fontWeight: 700 }}>
                     {balances.length === 0 ? "残高データはありません。" : "検索条件に一致する行がありません。"}
                   </td>
                 </tr>
@@ -351,13 +353,20 @@ export function ReceivablesView({
 
       <section style={card}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <h3 className="m-0 text-xl font-extrabold tracking-[0.06em]">売掛登録履歴（{AR_BOOK_LABELS[book]}）</h3>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <h3 className="m-0 text-xl font-extrabold tracking-[0.06em]">売掛登録履歴</h3>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <select style={inp} value={exportDept} onChange={(e) => setExportDept(parseArBook(e.target.value))} aria-label="出力する部署">
+              {AR_BOOKS.map((b) => (
+                <option key={b} value={b}>
+                  {AR_BOOK_LABELS[b]}
+                </option>
+              ))}
+            </select>
             <input style={inp} type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
             <MonthlyExportLinks
               month={month}
-              pdfHref={`/admin/receivables/monthly-pdf?dept=${book}`}
-              csvHref={`/admin/exports/receivables-monthly?book=${book}`}
+              pdfHref={`/admin/receivables/monthly-pdf?dept=${exportDept}`}
+              csvHref={`/admin/exports/receivables-monthly?book=${exportDept}`}
               pdfLabel="月次明細 PDF"
               csvLabel="月別入金 CSV"
             />
@@ -381,6 +390,7 @@ export function ReceivablesView({
             <thead>
               <tr style={{ textAlign: "left", borderBottom: "1px solid #e2e8f0" }}>
                 <th style={{ padding: 8 }}>日付</th>
+                <th style={{ padding: 8 }}>部署</th>
                 <th style={{ padding: 8 }}>区分</th>
                 <th style={{ padding: 8 }}>顧客</th>
                 <th style={{ padding: 8, textAlign: "right" }}>金額</th>
@@ -392,6 +402,7 @@ export function ReceivablesView({
               {filteredRecentLines.map((r) => (
                 <tr key={r.id} style={{ borderTop: "1px solid #f1f5f9" }}>
                   <td style={{ padding: 8 }}>{r.transactionDate}</td>
+                  <td style={{ padding: 8 }}>{AR_BOOK_LABELS[r.book]}</td>
                   <td style={{ padding: 8 }}>{r.kind === "ar_sale" ? "売上" : "入金"}</td>
                   <td style={{ padding: 8 }}>{r.customerName ?? "—"}</td>
                   <td style={{ padding: 8, textAlign: "right" }}>{yen(r.amountMinor)}</td>
@@ -407,7 +418,7 @@ export function ReceivablesView({
                       onClick={() => {
                         if (!window.confirm(`${r.kind === "ar_sale" ? "売上" : "入金"} の履歴を削除しますか？関連する仕訳もまとめて削除されます。`)) return;
                         startTransition(() =>
-                          void deleteArHistoryLine(r.id, book)
+                          void deleteArHistoryLine(r.id)
                             .then(() => {
                               setMsg("履歴を削除しました");
                               router.refresh();
@@ -423,7 +434,7 @@ export function ReceivablesView({
               ))}
               {filteredRecentLines.length === 0 ? (
                 <tr>
-                  <td colSpan={6} style={{ padding: 12, color: "#64748b", fontWeight: 700 }}>
+                  <td colSpan={7} style={{ padding: 12, color: "#64748b", fontWeight: 700 }}>
                     {recentLines.length === 0 ? "登録履歴はまだありません。" : "検索条件に一致する行がありません。"}
                   </td>
                 </tr>
@@ -447,6 +458,24 @@ export function ReceivablesView({
             日付
             <input style={inp} type="date" value={editDate} onChange={(e) => setEditDate(e.target.value)} />
           </label>
+          <label style={{ display: "grid", gap: 6, fontSize: 16, fontWeight: 700, letterSpacing: "0.05em" }}>
+            部署
+            <select
+              style={inp}
+              value={editBook}
+              disabled={editKind === "ar_payment" || (editKind === "ar_sale" && editSaleAllocationLocked) || pending}
+              onChange={(e) => setEditBook(parseArBook(e.target.value))}
+            >
+              {AR_BOOKS.map((b) => (
+                <option key={b} value={b}>
+                  {AR_BOOK_LABELS[b]}
+                </option>
+              ))}
+            </select>
+          </label>
+          {editKind === "ar_payment" ? (
+            <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: "#64748b" }}>入金の部署は変更できません。</p>
+          ) : null}
           {editKind === "ar_sale" ? (
             <>
               <label style={{ display: "grid", gap: 6, fontSize: 16, fontWeight: 700, letterSpacing: "0.05em" }}>
@@ -511,13 +540,31 @@ export function ReceivablesView({
         <div style={{ padding: 16, borderBottom: "1px solid #e2e8f0", fontWeight: 800, letterSpacing: "0.08em", fontSize: 18 }}>入金消込</div>
         <div style={{ padding: 16, display: "grid", gap: 12 }}>
           <label style={{ display: "grid", gap: 6, fontSize: 16, fontWeight: 700, letterSpacing: "0.05em" }}>
+            部署
+            <select
+              style={inp}
+              value={payBook}
+              onChange={(e) => {
+                const next = parseArBook(e.target.value);
+                setPayBook(next);
+                if (payCustomerId) loadOpen(payCustomerId, next);
+              }}
+            >
+              {AR_BOOKS.map((b) => (
+                <option key={b} value={b}>
+                  {AR_BOOK_LABELS[b]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label style={{ display: "grid", gap: 6, fontSize: 16, fontWeight: 700, letterSpacing: "0.05em" }}>
             顧客
             <select
               style={inp}
               value={payCustomerId}
               onChange={(e) => {
                 setPayCustomerId(e.target.value);
-                loadOpen(e.target.value);
+                loadOpen(e.target.value, payBook);
               }}
             >
               <option value="">選択してください</option>

@@ -1,4 +1,4 @@
-import { AR_BOOK_LABELS, parseArBook, arAdminPath } from "@/lib/ar-ap-books";
+import { AR_BOOK_LABELS, parseArBook } from "@/lib/ar-ap-books";
 import { ArApMonthlyPdfDocument } from "@/components/ar-ap-monthly-pdf-document";
 import { getMonthlyArLedgerForPdf } from "../actions";
 
@@ -19,7 +19,7 @@ export default async function ReceivablesMonthlyPdfPage({
       title="売掛 月次明細"
       divisionLabel={AR_BOOK_LABELS[book]}
       month={report.month}
-      backHref={arAdminPath(book)}
+      backHref="/admin/receivables"
       partyColumnLabel="顧客"
       rows={report.rows}
       footerTotals={[
