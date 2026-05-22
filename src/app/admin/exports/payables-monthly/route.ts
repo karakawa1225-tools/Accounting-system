@@ -1,13 +1,15 @@
 import { getMonthlyApPaymentLines } from "@/app/admin/payables/actions";
+import { AP_BOOK_LABELS, parseApBook } from "@/lib/ar-ap-books";
 import { csvDownloadResponse } from "@/lib/csv-response";
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const month = url.searchParams.get("month") ?? new Date().toISOString().slice(0, 7);
+  const book = parseApBook(url.searchParams.get("book"));
   if (!/^\d{4}-\d{2}$/.test(month)) return new Response("月指定が不正です", { status: 400 });
-  const report = await getMonthlyApPaymentLines(month);
+  const report = await getMonthlyApPaymentLines(month, book);
   return csvDownloadResponse(
-    `買掛支払_${month}.csv`,
+    `買掛支払_${AP_BOOK_LABELS[book]}_${month}.csv`,
     ["日付", "仕入先コード", "仕入先名", "支払額", "摘要"],
     report.rows.map((r) => [
       r.transactionDate,

@@ -5,11 +5,15 @@ import { accounts, type AccountCategory } from "@/db/schema";
 
 /** DB に未投入の環境向け。ensure スクリプトと同じ内容をコード側でも補完する。 */
 const SYSTEM_ACCOUNT_ROWS: { code: string; name: string; category: AccountCategory }[] = [
-  { code: "SYS_AR", name: "売掛金", category: "asset" },
-  { code: "SYS_SALES", name: "売上高", category: "revenue" },
+  { code: "SYS_AR", name: "売掛金（施工部）", category: "asset" },
+  { code: "SYS_SALES", name: "売上高（施工部）", category: "revenue" },
+  { code: "SYS_AR_KIKO", name: "売掛金（機工部）", category: "asset" },
+  { code: "SYS_SALES_KIKO", name: "売上高（機工部）", category: "revenue" },
   { code: "SYS_BANK", name: "普通預金", category: "asset" },
   { code: "SYS_AP", name: "買掛金", category: "liability" },
   { code: "SYS_PURCHASES", name: "仕入高", category: "expense" },
+  { code: "SYS_AP_GAICHU", name: "未払外注費", category: "liability" },
+  { code: "SYS_GAICHU", name: "外注費", category: "expense" },
   { code: "SYS_OPENING", name: "期首貸借調整", category: "equity" },
   { code: "SYS_BANK_FEE", name: "振込手数料", category: "expense" },
 ];
@@ -38,9 +42,13 @@ export async function ensureSystemAccountRows(db: Database) {
 export const SYSTEM_ACCOUNT_CODES = {
   AR: "SYS_AR",
   SALES: "SYS_SALES",
+  AR_KIKO: "SYS_AR_KIKO",
+  SALES_KIKO: "SYS_SALES_KIKO",
   BANK: "SYS_BANK",
   AP: "SYS_AP",
   PURCHASES: "SYS_PURCHASES",
+  AP_GAICHU: "SYS_AP_GAICHU",
+  GAICHU: "SYS_GAICHU",
   /** 期首残高の貸借差額を吸収する純資産勘定（ユーザー入力の合計と複式で釣り合わせる） */
   OPENING: "SYS_OPENING",
   BANK_FEE: "SYS_BANK_FEE",
@@ -67,9 +75,13 @@ export async function getSystemAccounts(db: Database) {
   return {
     arId: map.get(SYSTEM_ACCOUNT_CODES.AR)!,
     salesId: map.get(SYSTEM_ACCOUNT_CODES.SALES)!,
+    arKikoId: map.get(SYSTEM_ACCOUNT_CODES.AR_KIKO)!,
+    salesKikoId: map.get(SYSTEM_ACCOUNT_CODES.SALES_KIKO)!,
     bankId: map.get(SYSTEM_ACCOUNT_CODES.BANK)!,
     apId: map.get(SYSTEM_ACCOUNT_CODES.AP)!,
     purchasesId: map.get(SYSTEM_ACCOUNT_CODES.PURCHASES)!,
+    apOutsourceId: map.get(SYSTEM_ACCOUNT_CODES.AP_GAICHU)!,
+    outsourceExpenseId: map.get(SYSTEM_ACCOUNT_CODES.GAICHU)!,
     openingId: map.get(SYSTEM_ACCOUNT_CODES.OPENING)!,
     bankFeeId: map.get(SYSTEM_ACCOUNT_CODES.BANK_FEE)!,
   };

@@ -6,6 +6,7 @@ import { alias } from "drizzle-orm/sqlite-core";
 import { getDb } from "@/db";
 import { accounts, customers, payees, transactions, vendors } from "@/db/schema";
 import { getSystemAccounts } from "@/lib/system-accounts";
+import { transactionDateInMonth } from "@/lib/transaction-month-filter";
 
 export type BankLedgerFilter = {
   month?: string;
@@ -72,7 +73,7 @@ export async function getBankLedgerLines(filter: BankLedgerFilter = {}): Promise
 
   const filters = [
     eq(transactions.accountId, bankAccountId),
-    ...(monthOk ? [sql`substr(${transactions.transactionDate},1,7) = ${filter.month}`] : []),
+    ...(monthOk ? [transactionDateInMonth(transactions.transactionDate, filter.month!)] : []),
     ...(flow === "in"
       ? [gt(transactions.debitAmountMinor, 0)]
       : flow === "out"

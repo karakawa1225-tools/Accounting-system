@@ -11,8 +11,10 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     ["/admin/masters", "日次管理"],
     ["/admin/guide", "取扱説明書"],
     ["/admin/csv-guide", "CSVガイド"],
-    ["/admin/receivables", "売掛処理"],
-    ["/admin/payables", "買掛処理"],
+    ["/admin/receivables/seko", "売掛（施工部）"],
+    ["/admin/receivables/kiko", "売掛（機工部）"],
+    ["/admin/payables/kaikake", "買掛（買掛金）"],
+    ["/admin/payables/gaichu", "買掛（外注費）"],
     ["/admin/bank-transactions", "入出金"],
     ["/admin/bizgo", "BizGO精算"],
   ] as const;
@@ -32,8 +34,10 @@ export default async function AdminLayout({ children }: { children: React.ReactN
           <Link href="/admin/masters">マスタ管理</Link>
           <Link href="/admin/guide">取扱説明書</Link>
           <Link href="/admin/csv-guide">CSVガイド</Link>
-          <Link href="/admin/receivables">売掛管理</Link>
-          <Link href="/admin/payables">買掛管理</Link>
+          <Link href="/admin/receivables/seko">売掛（施工）</Link>
+          <Link href="/admin/receivables/kiko">売掛（機工）</Link>
+          <Link href="/admin/payables/kaikake">買掛金</Link>
+          <Link href="/admin/payables/gaichu">外注費</Link>
           <Link href="/admin/bank-transactions">入出金</Link>
           <Link href="/admin/bizgo">BizGO精算</Link>
           {isAdmin ? <Link href="/admin/company">自社設定</Link> : null}

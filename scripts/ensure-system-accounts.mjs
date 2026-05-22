@@ -9,11 +9,15 @@ if (!url) {
 
 /** @type {{ code: string; name: string; category: string }[]} */
 const SYSTEM = [
-  { code: "SYS_AR", name: "売掛金", category: "asset" },
-  { code: "SYS_SALES", name: "売上高", category: "revenue" },
+  { code: "SYS_AR", name: "売掛金（施工部）", category: "asset" },
+  { code: "SYS_SALES", name: "売上高（施工部）", category: "revenue" },
+  { code: "SYS_AR_KIKO", name: "売掛金（機工部）", category: "asset" },
+  { code: "SYS_SALES_KIKO", name: "売上高（機工部）", category: "revenue" },
   { code: "SYS_BANK", name: "普通預金", category: "asset" },
   { code: "SYS_AP", name: "買掛金", category: "liability" },
   { code: "SYS_PURCHASES", name: "仕入高", category: "expense" },
+  { code: "SYS_AP_GAICHU", name: "未払外注費", category: "liability" },
+  { code: "SYS_GAICHU", name: "外注費", category: "expense" },
   { code: "SYS_OPENING", name: "期首貸借調整", category: "equity" },
   { code: "SYS_BANK_FEE", name: "振込手数料", category: "expense" },
 ];

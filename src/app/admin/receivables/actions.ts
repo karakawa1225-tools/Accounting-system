@@ -9,11 +9,24 @@ import {
   parseTransferFeeBearer,
   type TransferFeeBearer,
 } from "@/lib/payment-transfer-fee";
+import {
+  type ArBook,
+  arRevalidatePaths,
+  parseArBook,
+  resolveArAccounts,
+} from "@/lib/ar-ap-books";
 import { getSystemAccounts } from "@/lib/system-accounts";
+import { transactionDateInMonth } from "@/lib/transaction-month-filter";
+
+function revalidateAr(book: ArBook) {
+  for (const p of arRevalidatePaths(book)) revalidatePath(p);
+}
 
 export async function registerArSale(formData: FormData) {
+  const book = parseArBook(String(formData.get("book") ?? ""));
   const db = getDb();
   const sys = await getSystemAccounts(db);
+  const { arId, salesId } = resolveArAccounts(sys, book);
   const customerId = String(formData.get("customerId") ?? "");
   const transactionDate = String(formData.get("transactionDate") ?? "");
   const amountMinor = Math.floor(Number(formData.get("amountMinor") ?? 0));
@@ -23,15 +36,16 @@ export async function registerArSale(formData: FormData) {
   if (amountMinor <= 0) throw new Error("金額は1円以上で入力してください");
   const entryGroupId = crypto.randomUUID();
   await db.insert(transactions).values([
-    { entryGroupId, transactionDate, accountId: sys.arId, customerId, amountMinor, debitAmountMinor: amountMinor, creditAmountMinor: 0, summary, kind: "ar_sale" },
-    { entryGroupId, transactionDate, accountId: sys.salesId, amountMinor, debitAmountMinor: 0, creditAmountMinor: amountMinor, summary, kind: "ar_sale" },
+    { entryGroupId, transactionDate, accountId: arId, customerId, amountMinor, debitAmountMinor: amountMinor, creditAmountMinor: 0, summary, kind: "ar_sale" },
+    { entryGroupId, transactionDate, accountId: salesId, amountMinor, debitAmountMinor: 0, creditAmountMinor: amountMinor, summary, kind: "ar_sale" },
   ]);
-  revalidatePath("/admin/receivables");
+  revalidateAr(book);
 }
 
-export async function getArRecentLines(limit = 120) {
+export async function getArRecentLines(book: ArBook, limit = 120) {
   const db = getDb();
   const sys = await getSystemAccounts(db);
+  const { arId } = resolveArAccounts(sys, book);
   const rows = await db
     .select({
       id: transactions.id,
@@ -53,7 +67,7 @@ export async function getArRecentLines(limit = 120) {
     .leftJoin(customers, eq(transactions.customerId, customers.id))
     .where(
       and(
-        eq(transactions.accountId, sys.arId),
+        eq(transactions.accountId, arId),
         isNotNull(transactions.customerId),
         sql`${transactions.kind} in ('ar_sale','ar_payment')`
       )
@@ -70,11 +84,12 @@ export async function getArRecentLines(limit = 120) {
   });
 }
 
-export async function deleteArHistoryLine(transactionId: string) {
+export async function deleteArHistoryLine(transactionId: string, book: ArBook) {
   const db = getDb();
   const sys = await getSystemAccounts(db);
+  const { arId } = resolveArAccounts(sys, book);
   const [row] = await db.select().from(transactions).where(eq(transactions.id, transactionId)).limit(1);
-  if (!row || row.accountId !== sys.arId || !row.entryGroupId) throw new Error("対象の売掛履歴が見つかりません");
+  if (!row || row.accountId !== arId || !row.entryGroupId) throw new Error("対象の売掛履歴が見つかりません");
 
   if (row.kind === "ar_sale") {
     if (row.debitAmountMinor <= 0) throw new Error("売上行の形式が不正です");
@@ -89,19 +104,19 @@ export async function deleteArHistoryLine(transactionId: string) {
     throw new Error("この区分は削除できません");
   }
 
-  revalidatePath("/admin/receivables");
-  revalidatePath("/admin/bank-transactions");
-  revalidatePath("/dashboard");
+  revalidateAr(book);
 }
 
 export async function updateArHistoryLine(
   transactionId: string,
+  book: ArBook,
   input: { transactionDate: string; summary: string | null; amountMinor?: number; customerId?: string }
 ) {
   const db = getDb();
   const sys = await getSystemAccounts(db);
+  const { arId, salesId } = resolveArAccounts(sys, book);
   const [row] = await db.select().from(transactions).where(eq(transactions.id, transactionId)).limit(1);
-  if (!row || row.accountId !== sys.arId || !row.entryGroupId) throw new Error("対象の売掛履歴が見つかりません");
+  if (!row || row.accountId !== arId || !row.entryGroupId) throw new Error("対象の売掛履歴が見つかりません");
 
   const date = String(input.transactionDate ?? "").trim();
   if (!date) throw new Error("日付を入力してください");
@@ -115,9 +130,7 @@ export async function updateArHistoryLine(
         .update(transactions)
         .set({ transactionDate: date, summary, updatedAt: new Date() })
         .where(eq(transactions.entryGroupId, eg));
-      revalidatePath("/admin/receivables");
-      revalidatePath("/admin/bank-transactions");
-      revalidatePath("/dashboard");
+      revalidateAr(book);
       return;
     }
 
@@ -137,7 +150,7 @@ export async function updateArHistoryLine(
         amountMinor: amount,
         updatedAt: new Date(),
       })
-      .where(and(eq(transactions.entryGroupId, eg), eq(transactions.accountId, sys.arId)));
+      .where(and(eq(transactions.entryGroupId, eg), eq(transactions.accountId, arId)));
 
     await db
       .update(transactions)
@@ -149,11 +162,9 @@ export async function updateArHistoryLine(
         amountMinor: amount,
         updatedAt: new Date(),
       })
-      .where(and(eq(transactions.entryGroupId, eg), eq(transactions.accountId, sys.salesId)));
+      .where(and(eq(transactions.entryGroupId, eg), eq(transactions.accountId, salesId)));
 
-    revalidatePath("/admin/receivables");
-    revalidatePath("/admin/bank-transactions");
-    revalidatePath("/dashboard");
+    revalidateAr(book);
     return;
   }
 
@@ -162,19 +173,18 @@ export async function updateArHistoryLine(
       .update(transactions)
       .set({ transactionDate: date, summary, updatedAt: new Date() })
       .where(eq(transactions.entryGroupId, eg));
-    revalidatePath("/admin/receivables");
-    revalidatePath("/admin/bank-transactions");
-    revalidatePath("/dashboard");
+    revalidateAr(book);
     return;
   }
 
   throw new Error("この区分は編集できません");
 }
 
-export async function getMonthlyArPaymentLines(month: string) {
+export async function getMonthlyArPaymentLines(month: string, book: ArBook) {
   if (!/^\d{4}-\d{2}$/.test(month)) throw new Error("月指定が不正です");
   const db = getDb();
   const sys = await getSystemAccounts(db);
+  const { arId } = resolveArAccounts(sys, book);
   const rows = await db
     .select({
       transactionDate: transactions.transactionDate,
@@ -187,19 +197,67 @@ export async function getMonthlyArPaymentLines(month: string) {
     .leftJoin(customers, eq(transactions.customerId, customers.id))
     .where(
       and(
-        eq(transactions.accountId, sys.arId),
+        eq(transactions.accountId, arId),
         eq(transactions.kind, "ar_payment"),
-        sql`substr(${transactions.transactionDate},1,7) = ${month}`
+        transactionDateInMonth(transactions.transactionDate, month)
       )
     )
     .orderBy(asc(transactions.transactionDate), asc(customers.code), asc(customers.name));
   const totalMinor = rows.reduce((s, r) => s + r.amountMinor, 0);
-  return { month, rows, totalMinor };
+  return { month, book, rows, totalMinor };
 }
 
-export async function getReceivableBalances() {
+/** 月次明細 PDF（売上・入金の登録のみ） */
+export async function getMonthlyArLedgerForPdf(month: string, book: ArBook) {
+  if (!/^\d{4}-\d{2}$/.test(month)) throw new Error("月指定が不正です");
   const db = getDb();
   const sys = await getSystemAccounts(db);
+  const { arId } = resolveArAccounts(sys, book);
+  const rows = await db
+    .select({
+      id: transactions.id,
+      transactionDate: transactions.transactionDate,
+      kind: transactions.kind,
+      customerName: customers.name,
+      debitAmountMinor: transactions.debitAmountMinor,
+      creditAmountMinor: transactions.creditAmountMinor,
+      summary: transactions.summary,
+    })
+    .from(transactions)
+    .leftJoin(customers, eq(transactions.customerId, customers.id))
+    .where(
+      and(
+        eq(transactions.accountId, arId),
+        sql`${transactions.kind} in ('ar_sale','ar_payment')`,
+        transactionDateInMonth(transactions.transactionDate, month)
+      )
+    )
+    .orderBy(asc(transactions.transactionDate), asc(transactions.id));
+
+  let salesTotal = 0;
+  let paymentTotal = 0;
+  const lines = rows.map((r) => {
+    const isSale = r.kind === "ar_sale";
+    const amountMinor = isSale ? r.debitAmountMinor : r.creditAmountMinor;
+    if (isSale) salesTotal += amountMinor;
+    else paymentTotal += amountMinor;
+    return {
+      id: r.id,
+      transactionDate: r.transactionDate,
+      kindLabel: isSale ? "売上" : "入金",
+      partyName: r.customerName ?? "",
+      amountMinor,
+      summary: r.summary,
+    };
+  });
+
+  return { month, book, rows: lines, salesTotal, paymentTotal };
+}
+
+export async function getReceivableBalances(book: ArBook) {
+  const db = getDb();
+  const sys = await getSystemAccounts(db);
+  const { arId } = resolveArAccounts(sys, book);
   const allCustomers = await db.select().from(customers).orderBy(asc(customers.code), asc(customers.name));
   const rows = await db
     .select({
@@ -207,7 +265,7 @@ export async function getReceivableBalances() {
       balance: sql<number>`coalesce(sum(${transactions.debitAmountMinor} - ${transactions.creditAmountMinor}),0)`,
     })
     .from(transactions)
-    .where(and(eq(transactions.accountId, sys.arId), isNotNull(transactions.customerId)))
+    .where(and(eq(transactions.accountId, arId), isNotNull(transactions.customerId)))
     .groupBy(transactions.customerId);
   const map = new Map(rows.map((r) => [r.customerId, Number(r.balance)]));
   return allCustomers.map((c) => ({ id: c.id, name: c.name, balanceMinor: map.get(c.id) ?? 0 }));
@@ -221,9 +279,10 @@ export type ArOpenLine = {
   openMinor: number;
 };
 
-export async function getArOpenLines(customerId: string): Promise<ArOpenLine[]> {
+export async function getArOpenLines(customerId: string, book: ArBook): Promise<ArOpenLine[]> {
   const db = getDb();
   const sys = await getSystemAccounts(db);
+  const { arId } = resolveArAccounts(sys, book);
   const salesTx = await db
     .select({
       id: transactions.id,
@@ -235,7 +294,7 @@ export async function getArOpenLines(customerId: string): Promise<ArOpenLine[]> 
     .where(
       and(
         eq(transactions.customerId, customerId),
-        eq(transactions.accountId, sys.arId),
+        eq(transactions.accountId, arId),
         eq(transactions.kind, "ar_sale"),
         gt(transactions.debitAmountMinor, 0)
       )
@@ -268,6 +327,7 @@ export async function getArOpenLines(customerId: string): Promise<ArOpenLine[]> 
 }
 
 export async function registerArPayment(input: {
+  book: ArBook;
   customerId: string;
   transactionDate: string;
   summary: string | null;
@@ -277,6 +337,7 @@ export async function registerArPayment(input: {
   feeBearer: TransferFeeBearer;
   allocations: { salesArDebitTransactionId: string; amountMinor: number }[];
 }) {
+  const book = parseArBook(input.book);
   const transfer = Math.floor(input.transferMinor);
   const fee = Math.max(0, Math.floor(input.transferFeeMinor || 0));
   const bearer = parseTransferFeeBearer(input.feeBearer);
@@ -294,7 +355,8 @@ export async function registerArPayment(input: {
 
   const db = getDb();
   const sys = await getSystemAccounts(db);
-  const openLines = await getArOpenLines(input.customerId);
+  const { arId } = resolveArAccounts(sys, book);
+  const openLines = await getArOpenLines(input.customerId, book);
   const openMap = new Map(openLines.map((l) => [l.id, l.openMinor]));
 
   for (const a of input.allocations) {
@@ -332,7 +394,7 @@ export async function registerArPayment(input: {
         id: arCreditId,
         entryGroupId,
         transactionDate: input.transactionDate,
-        accountId: sys.arId,
+        accountId: arId,
         customerId: input.customerId,
         amountMinor: allocTarget,
         debitAmountMinor: 0,
@@ -369,6 +431,5 @@ export async function registerArPayment(input: {
     }
   });
 
-  revalidatePath("/admin/receivables");
-  revalidatePath("/admin/bank-transactions");
+  revalidateAr(book);
 }

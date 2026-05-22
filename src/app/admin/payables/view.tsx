@@ -1,8 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useRef, useState, useTransition } from "react";
 import { MonthlyExportLinks } from "@/components/monthly-export-links";
+import { AP_BOOK_LABELS, AP_BOOKS, type ApBook, apAdminPath } from "@/lib/ar-ap-books";
 import { FiscalPeriodInlineTable } from "@/lib/fiscal-period-ui";
 import { matchesListSearch } from "@/lib/list-search";
 import { apAllocationTargetMinor, type TransferFeeBearer } from "@/lib/payment-transfer-fee";
@@ -53,12 +55,14 @@ function fifoAllocate(lines: ApOpenLine[], total: number): Record<string, number
 }
 
 export function PayablesView({
+  book,
   balances,
   vendors,
   recentLines,
   fiscalStart,
   fiscalEnd,
 }: {
+  book: ApBook;
   balances: { id: string; name: string; balanceMinor: number }[];
   vendors: { id: string; name: string; code: string | null }[];
   fiscalStart?: string | null;
@@ -103,11 +107,12 @@ export function PayablesView({
   const filteredRecentLines = useMemo(() => {
     if (!historySearch.trim()) return recentLines;
     return recentLines.filter((r) => {
-      const kind = r.kind === "ap_purchase" ? "仕入" : "支払";
+      const purchaseLabel = book === "gaichu" ? "外注" : "仕入";
+      const kind = r.kind === "ap_purchase" ? purchaseLabel : "支払";
       const hay = [r.transactionDate, kind, r.vendorName ?? "", r.summary ?? "", String(r.amountMinor), yen(r.amountMinor)].join(" ");
       return matchesListSearch(hay, historySearch);
     });
-  }, [recentLines, historySearch]);
+  }, [recentLines, historySearch, book]);
 
   const editRef = useRef<HTMLDialogElement>(null);
   const [editLineId, setEditLineId] = useState("");
@@ -146,7 +151,7 @@ export function PayablesView({
                   }),
             }
           : { transactionDate: editDate, summary: editSummary.trim() || null };
-      void updateApHistoryLine(editLineId, payload)
+      void updateApHistoryLine(editLineId, book, payload)
         .then(() => {
           setMsg("履歴を更新しました");
           editRef.current?.close();
@@ -163,7 +168,7 @@ export function PayablesView({
       return;
     }
     startTransition(() =>
-      void getApOpenLines(vid)
+      void getApOpenLines(vid, book)
         .then((lines) => {
           setOpenLines(lines);
           const sum = lines.reduce((s, l) => s + l.openMinor, 0);
@@ -210,6 +215,7 @@ export function PayablesView({
       .filter((a) => a.amountMinor > 0);
     startTransition(() =>
       void registerApPayment({
+        book,
         vendorId: payVendorId,
         transactionDate: payDate,
         summary: paySummary.trim() || null,
@@ -228,7 +234,27 @@ export function PayablesView({
 
   return (
     <main style={{ display: "grid", gap: 16 }}>
-      <h1 className="m-0 text-3xl font-extrabold tracking-[0.08em] sm:text-4xl">買掛管理</h1>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", justifyContent: "space-between" }}>
+        <h1 className="m-0 text-3xl font-extrabold tracking-[0.08em] sm:text-4xl">買掛管理（{AP_BOOK_LABELS[book]}）</h1>
+        <nav style={{ display: "flex", gap: 8, flexWrap: "wrap", fontSize: 14, fontWeight: 700 }}>
+          {AP_BOOKS.map((b) => (
+            <Link
+              key={b}
+              href={apAdminPath(b)}
+              style={{
+                padding: "8px 12px",
+                borderRadius: 8,
+                border: b === book ? "2px solid #3b82f6" : "1px solid #94a3b8",
+                background: b === book ? "#eff6ff" : "#f8fafc",
+                color: b === book ? "#1d4ed8" : "#334155",
+                textDecoration: "none",
+              }}
+            >
+              {AP_BOOK_LABELS[b]}
+            </Link>
+          ))}
+        </nav>
+      </div>
       {msg ? (
         <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: "0.04em", color: msg.includes("失敗") ? "#b91c1c" : "#15803d" }}>{msg}</div>
       ) : null}
@@ -243,7 +269,8 @@ export function PayablesView({
         }
         style={{ ...card, display: "grid", gap: 8 }}
       >
-        <h3 className="m-0 text-xl font-extrabold tracking-[0.06em]">仕入登録</h3>
+        <input type="hidden" name="book" value={book} />
+        <h3 className="m-0 text-xl font-extrabold tracking-[0.06em]">{book === "gaichu" ? "外注費登録" : "仕入登録"}</h3>
         <select style={inp} name="vendorId" required>
           {vendors.map((v) => (
             <option key={v.id} value={v.id}>
@@ -319,15 +346,15 @@ export function PayablesView({
             <input style={inp} type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
             <MonthlyExportLinks
               month={month}
-              pdfHref="/admin/payables/monthly-pdf"
-              csvHref="/admin/exports/payables-monthly"
-              pdfLabel="月別支払 PDF"
+              pdfHref={`/admin/payables/monthly-pdf?book=${book}`}
+              csvHref={`/admin/exports/payables-monthly?book=${book}`}
+              pdfLabel="月次明細 PDF"
               csvLabel="月別支払 CSV"
             />
             <MonthlyExportLinks
               month={month}
-              pdfHref="/admin/payables/vendor-monthly-pdf"
-              csvHref="/admin/exports/vendor-payments"
+              pdfHref={`/admin/payables/vendor-monthly-pdf?book=${book}`}
+              csvHref={`/admin/exports/vendor-payments?book=${book}`}
               pdfLabel="仕入先振込 PDF"
               csvLabel="仕入先振込 CSV"
             />
@@ -377,7 +404,7 @@ export function PayablesView({
                       onClick={() => {
                         if (!window.confirm(`${r.kind === "ap_purchase" ? "仕入" : "支払"} の履歴を削除しますか？関連する仕訳もまとめて削除されます。`)) return;
                         startTransition(() =>
-                          void deleteApHistoryLine(r.id)
+                          void deleteApHistoryLine(r.id, book)
                             .then(() => {
                               setMsg("履歴を削除しました");
                               router.refresh();

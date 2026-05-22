@@ -40,11 +40,15 @@ async function main() {
 
   await ensureDefaultCompany();
 
-  await ensureAccount(SYSTEM_ACCOUNT_CODES.AR, "売掛金", "asset");
-  await ensureAccount(SYSTEM_ACCOUNT_CODES.SALES, "売上高", "revenue");
+  await ensureAccount(SYSTEM_ACCOUNT_CODES.AR, "売掛金（施工部）", "asset");
+  await ensureAccount(SYSTEM_ACCOUNT_CODES.SALES, "売上高（施工部）", "revenue");
+  await ensureAccount(SYSTEM_ACCOUNT_CODES.AR_KIKO, "売掛金（機工部）", "asset");
+  await ensureAccount(SYSTEM_ACCOUNT_CODES.SALES_KIKO, "売上高（機工部）", "revenue");
   await ensureAccount(SYSTEM_ACCOUNT_CODES.BANK, "普通預金", "asset");
   await ensureAccount(SYSTEM_ACCOUNT_CODES.AP, "買掛金", "liability");
   await ensureAccount(SYSTEM_ACCOUNT_CODES.PURCHASES, "仕入高", "expense");
+  await ensureAccount(SYSTEM_ACCOUNT_CODES.AP_GAICHU, "未払外注費", "liability");
+  await ensureAccount(SYSTEM_ACCOUNT_CODES.GAICHU, "外注費", "expense");
   await ensureAccount(SYSTEM_ACCOUNT_CODES.OPENING, "期首貸借調整", "equity");
 
   const passwordHash = await bcrypt.hash(password, 12);

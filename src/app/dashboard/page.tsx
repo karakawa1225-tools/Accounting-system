@@ -27,43 +27,61 @@ export default async function DashboardPage() {
     db.select({ c: sql<number>`count(*)`.mapWith(Number) }).from(vendors),
   ]);
 
-  const [arSum] = await db
-    .select({
-      v: sql<number>`coalesce(sum(${transactions.debitAmountMinor} - ${transactions.creditAmountMinor}),0)`.mapWith(Number),
-    })
-    .from(transactions)
-    .where(sql`${transactions.accountId} = ${sys.arId}`);
+  const balanceSum = (accountId: string, liability = false) =>
+    db
+      .select({
+        v: sql<number>`coalesce(sum(${
+          liability
+            ? sql`${transactions.creditAmountMinor} - ${transactions.debitAmountMinor}`
+            : sql`${transactions.debitAmountMinor} - ${transactions.creditAmountMinor}`
+        }),0)`.mapWith(Number),
+      })
+      .from(transactions)
+      .where(sql`${transactions.accountId} = ${accountId}`)
+      .then(([r]) => r?.v ?? 0);
 
-  const [apSum] = await db
-    .select({
-      v: sql<number>`coalesce(sum(${transactions.creditAmountMinor} - ${transactions.debitAmountMinor}),0)`.mapWith(Number),
-    })
-    .from(transactions)
-    .where(sql`${transactions.accountId} = ${sys.apId}`);
+  const monthExpenseSum = (accountId: string) =>
+    db
+      .select({
+        v: sql<number>`coalesce(sum(${transactions.debitAmountMinor}),0)`.mapWith(Number),
+      })
+      .from(transactions)
+      .where(
+        sql`${transactions.accountId} = ${accountId} and substr(${transactions.transactionDate},1,7) = strftime('%Y-%m','now','localtime')`
+      )
+      .then(([r]) => r?.v ?? 0);
 
-  const [salesMonth] = await db
-    .select({
-      v: sql<number>`coalesce(sum(${transactions.creditAmountMinor}),0)`.mapWith(Number),
-    })
-    .from(transactions)
-    .where(
-      sql`${transactions.accountId} = ${sys.salesId} and substr(${transactions.transactionDate},1,7) = strftime('%Y-%m','now','localtime')`
-    );
+  const monthRevenueSum = (accountId: string) =>
+    db
+      .select({
+        v: sql<number>`coalesce(sum(${transactions.creditAmountMinor}),0)`.mapWith(Number),
+      })
+      .from(transactions)
+      .where(
+        sql`${transactions.accountId} = ${accountId} and substr(${transactions.transactionDate},1,7) = strftime('%Y-%m','now','localtime')`
+      )
+      .then(([r]) => r?.v ?? 0);
 
-  const [purchaseMonth] = await db
-    .select({
-      v: sql<number>`coalesce(sum(${transactions.debitAmountMinor}),0)`.mapWith(Number),
-    })
-    .from(transactions)
-    .where(
-      sql`${transactions.accountId} = ${sys.purchasesId} and substr(${transactions.transactionDate},1,7) = strftime('%Y-%m','now','localtime')`
-    );
+  const [arSeko, arKiko, apKaikake, apGaichu, salesSeko, salesKiko, purchaseMonth, outsourceMonth] = await Promise.all([
+    balanceSum(sys.arId),
+    balanceSum(sys.arKikoId),
+    balanceSum(sys.apId, true),
+    balanceSum(sys.apOutsourceId, true),
+    monthRevenueSum(sys.salesId),
+    monthRevenueSum(sys.salesKikoId),
+    monthExpenseSum(sys.purchasesId),
+    monthExpenseSum(sys.outsourceExpenseId),
+  ]);
 
   const metricCards = [
-    { label: "売掛残高", value: yen(arSum?.v ?? 0), tone: "from-cyan-600/25 to-sky-600/10" },
-    { label: "買掛残高", value: yen(apSum?.v ?? 0), tone: "from-blue-700/25 to-indigo-600/10" },
-    { label: "当月売上", value: yen(salesMonth?.v ?? 0), tone: "from-emerald-500/25 to-cyan-600/10" },
-    { label: "当月仕入", value: yen(purchaseMonth?.v ?? 0), tone: "from-violet-500/25 to-blue-700/10" },
+    { label: "売掛（施工部）", value: yen(arSeko), tone: "from-cyan-600/25 to-sky-600/10" },
+    { label: "売掛（機工部）", value: yen(arKiko), tone: "from-teal-600/25 to-cyan-600/10" },
+    { label: "買掛金", value: yen(apKaikake), tone: "from-blue-700/25 to-indigo-600/10" },
+    { label: "外注費（未払）", value: yen(apGaichu), tone: "from-indigo-600/25 to-violet-600/10" },
+    { label: "当月売上（施工）", value: yen(salesSeko), tone: "from-emerald-500/25 to-cyan-600/10" },
+    { label: "当月売上（機工）", value: yen(salesKiko), tone: "from-lime-500/25 to-emerald-600/10" },
+    { label: "当月仕入", value: yen(purchaseMonth), tone: "from-violet-500/25 to-blue-700/10" },
+    { label: "当月外注費", value: yen(outsourceMonth), tone: "from-purple-500/25 to-indigo-700/10" },
   ];
 
   const masterCards = [
@@ -87,11 +105,17 @@ export default async function DashboardPage() {
             <Link className="rounded-md border border-teal-300/50 bg-teal-500/10 px-3 py-2 hover:bg-teal-400/20" href="/admin/csv-guide">
               CSVガイド
             </Link>
-            <Link className="rounded-md border border-sky-300/50 bg-sky-500/10 px-3 py-2 hover:bg-sky-400/20" href="/admin/receivables">
-              RECEIVABLES
+            <Link className="rounded-md border border-sky-300/50 bg-sky-500/10 px-3 py-2 hover:bg-sky-400/20" href="/admin/receivables/seko">
+              AR 施工
             </Link>
-            <Link className="rounded-md border border-blue-300/50 bg-blue-500/10 px-3 py-2 hover:bg-blue-400/20" href="/admin/payables">
-              PAYABLES
+            <Link className="rounded-md border border-teal-300/50 bg-teal-500/10 px-3 py-2 hover:bg-teal-400/20" href="/admin/receivables/kiko">
+              AR 機工
+            </Link>
+            <Link className="rounded-md border border-blue-300/50 bg-blue-500/10 px-3 py-2 hover:bg-blue-400/20" href="/admin/payables/kaikake">
+              AP 買掛
+            </Link>
+            <Link className="rounded-md border border-indigo-300/50 bg-indigo-500/10 px-3 py-2 hover:bg-indigo-400/20" href="/admin/payables/gaichu">
+              AP 外注
             </Link>
             {isAdmin ? (
               <Link className="rounded-md border border-indigo-300/50 bg-indigo-500/10 px-3 py-2 hover:bg-indigo-400/20" href="/admin/company">
@@ -147,7 +171,7 @@ export default async function DashboardPage() {
           <div className="mt-4 rounded-lg border border-slate-200 bg-gradient-to-r from-cyan-50 to-blue-50 px-3 py-3">
             <p className="text-xs font-bold tracking-[0.12em] text-slate-600">NEXT ACTION</p>
             <p className="mt-1 text-sm font-bold tracking-[0.06em] text-slate-800">
-              残高差異が大きい先を売掛・買掛管理から優先確認してください。
+              残高差異が大きい先を、施工部・機工部・買掛金・外注費の各管理画面から優先確認してください。
             </p>
           </div>
         </article>

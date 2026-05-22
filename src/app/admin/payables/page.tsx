@@ -1,25 +1,7 @@
-import { asc } from "drizzle-orm";
-import { getCompanyRow } from "@/app/admin/company/actions";
-import { getDb } from "@/db";
-import { vendors } from "@/db/schema";
-import { getApRecentLines, getPayableBalances } from "./actions";
-import { PayablesView } from "./view";
+import { redirect } from "next/navigation";
+import { apAdminPath } from "@/lib/ar-ap-books";
 
-export default async function PayablesPage() {
-  const db = getDb();
-  const [balances, vendorRows, recentLines, company] = await Promise.all([
-    getPayableBalances(),
-    db.select({ id: vendors.id, name: vendors.name, code: vendors.code }).from(vendors).orderBy(asc(vendors.code), asc(vendors.name)),
-    getApRecentLines(),
-    getCompanyRow(),
-  ]);
-  return (
-    <PayablesView
-      balances={balances}
-      vendors={vendorRows}
-      recentLines={recentLines}
-      fiscalStart={company.fiscalPeriodStart}
-      fiscalEnd={company.fiscalPeriodEnd}
-    />
-  );
+/** 従来URL → 買掛金 */
+export default function PayablesIndexPage() {
+  redirect(apAdminPath("kaikake"));
 }

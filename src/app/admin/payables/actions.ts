@@ -9,11 +9,24 @@ import {
   parseTransferFeeBearer,
   type TransferFeeBearer,
 } from "@/lib/payment-transfer-fee";
+import {
+  type ApBook,
+  apRevalidatePaths,
+  parseApBook,
+  resolveApAccounts,
+} from "@/lib/ar-ap-books";
 import { getSystemAccounts } from "@/lib/system-accounts";
+import { transactionDateInMonth } from "@/lib/transaction-month-filter";
+
+function revalidateAp(book: ApBook) {
+  for (const p of apRevalidatePaths(book)) revalidatePath(p);
+}
 
 export async function registerApPurchase(formData: FormData) {
+  const book = parseApBook(String(formData.get("book") ?? ""));
   const db = getDb();
   const sys = await getSystemAccounts(db);
+  const { apId, expenseId } = resolveApAccounts(sys, book);
   const vendorId = String(formData.get("vendorId") ?? "");
   const transactionDate = String(formData.get("transactionDate") ?? "");
   const amountMinor = Math.floor(Number(formData.get("amountMinor") ?? 0));
@@ -23,15 +36,16 @@ export async function registerApPurchase(formData: FormData) {
   if (amountMinor <= 0) throw new Error("金額は1円以上で入力してください");
   const entryGroupId = crypto.randomUUID();
   await db.insert(transactions).values([
-    { entryGroupId, transactionDate, accountId: sys.purchasesId, vendorId, amountMinor, debitAmountMinor: amountMinor, creditAmountMinor: 0, summary, kind: "ap_purchase" },
-    { entryGroupId, transactionDate, accountId: sys.apId, vendorId, amountMinor, debitAmountMinor: 0, creditAmountMinor: amountMinor, summary, kind: "ap_purchase" },
+    { entryGroupId, transactionDate, accountId: expenseId, vendorId, amountMinor, debitAmountMinor: amountMinor, creditAmountMinor: 0, summary, kind: "ap_purchase" },
+    { entryGroupId, transactionDate, accountId: apId, vendorId, amountMinor, debitAmountMinor: 0, creditAmountMinor: amountMinor, summary, kind: "ap_purchase" },
   ]);
-  revalidatePath("/admin/payables");
+  revalidateAp(book);
 }
 
-export async function getApRecentLines(limit = 120) {
+export async function getApRecentLines(book: ApBook, limit = 120) {
   const db = getDb();
   const sys = await getSystemAccounts(db);
+  const { apId } = resolveApAccounts(sys, book);
   const rows = await db
     .select({
       id: transactions.id,
@@ -53,7 +67,7 @@ export async function getApRecentLines(limit = 120) {
     .leftJoin(vendors, eq(transactions.vendorId, vendors.id))
     .where(
       and(
-        eq(transactions.accountId, sys.apId),
+        eq(transactions.accountId, apId),
         isNotNull(transactions.vendorId),
         sql`${transactions.kind} in ('ap_purchase','ap_payment')`
       )
@@ -70,11 +84,12 @@ export async function getApRecentLines(limit = 120) {
   });
 }
 
-export async function deleteApHistoryLine(transactionId: string) {
+export async function deleteApHistoryLine(transactionId: string, book: ApBook) {
   const db = getDb();
   const sys = await getSystemAccounts(db);
+  const { apId } = resolveApAccounts(sys, book);
   const [row] = await db.select().from(transactions).where(eq(transactions.id, transactionId)).limit(1);
-  if (!row || row.accountId !== sys.apId || !row.entryGroupId) throw new Error("対象の買掛履歴が見つかりません");
+  if (!row || row.accountId !== apId || !row.entryGroupId) throw new Error("対象の買掛履歴が見つかりません");
 
   if (row.kind === "ap_purchase") {
     if (row.creditAmountMinor <= 0) throw new Error("仕入行の形式が不正です");
@@ -89,19 +104,19 @@ export async function deleteApHistoryLine(transactionId: string) {
     throw new Error("この区分は削除できません");
   }
 
-  revalidatePath("/admin/payables");
-  revalidatePath("/admin/bank-transactions");
-  revalidatePath("/dashboard");
+  revalidateAp(book);
 }
 
 export async function updateApHistoryLine(
   transactionId: string,
+  book: ApBook,
   input: { transactionDate: string; summary: string | null; amountMinor?: number; vendorId?: string }
 ) {
   const db = getDb();
   const sys = await getSystemAccounts(db);
+  const { apId, expenseId } = resolveApAccounts(sys, book);
   const [row] = await db.select().from(transactions).where(eq(transactions.id, transactionId)).limit(1);
-  if (!row || row.accountId !== sys.apId || !row.entryGroupId) throw new Error("対象の買掛履歴が見つかりません");
+  if (!row || row.accountId !== apId || !row.entryGroupId) throw new Error("対象の買掛履歴が見つかりません");
 
   const date = String(input.transactionDate ?? "").trim();
   if (!date) throw new Error("日付を入力してください");
@@ -112,9 +127,7 @@ export async function updateApHistoryLine(
     const [alloc] = await db.select().from(apAllocations).where(eq(apAllocations.purchaseApCreditTransactionId, transactionId)).limit(1);
     if (alloc) {
       await db.update(transactions).set({ transactionDate: date, summary, updatedAt: new Date() }).where(eq(transactions.entryGroupId, eg));
-      revalidatePath("/admin/payables");
-      revalidatePath("/admin/bank-transactions");
-      revalidatePath("/dashboard");
+      revalidateAp(book);
       return;
     }
 
@@ -134,7 +147,7 @@ export async function updateApHistoryLine(
         amountMinor: amount,
         updatedAt: new Date(),
       })
-      .where(and(eq(transactions.entryGroupId, eg), eq(transactions.accountId, sys.purchasesId)));
+      .where(and(eq(transactions.entryGroupId, eg), eq(transactions.accountId, expenseId)));
 
     await db
       .update(transactions)
@@ -147,29 +160,26 @@ export async function updateApHistoryLine(
         amountMinor: amount,
         updatedAt: new Date(),
       })
-      .where(and(eq(transactions.entryGroupId, eg), eq(transactions.accountId, sys.apId)));
+      .where(and(eq(transactions.entryGroupId, eg), eq(transactions.accountId, apId)));
 
-    revalidatePath("/admin/payables");
-    revalidatePath("/admin/bank-transactions");
-    revalidatePath("/dashboard");
+    revalidateAp(book);
     return;
   }
 
   if (row.kind === "ap_payment") {
     await db.update(transactions).set({ transactionDate: date, summary, updatedAt: new Date() }).where(eq(transactions.entryGroupId, eg));
-    revalidatePath("/admin/payables");
-    revalidatePath("/admin/bank-transactions");
-    revalidatePath("/dashboard");
+    revalidateAp(book);
     return;
   }
 
   throw new Error("この区分は編集できません");
 }
 
-export async function getMonthlyApPaymentLines(month: string) {
+export async function getMonthlyApPaymentLines(month: string, book: ApBook) {
   if (!/^\d{4}-\d{2}$/.test(month)) throw new Error("月指定が不正です");
   const db = getDb();
   const sys = await getSystemAccounts(db);
+  const { apId } = resolveApAccounts(sys, book);
   const rows = await db
     .select({
       transactionDate: transactions.transactionDate,
@@ -182,21 +192,69 @@ export async function getMonthlyApPaymentLines(month: string) {
     .leftJoin(vendors, eq(transactions.vendorId, vendors.id))
     .where(
       and(
-        eq(transactions.accountId, sys.apId),
+        eq(transactions.accountId, apId),
         eq(transactions.kind, "ap_payment"),
-        sql`substr(${transactions.transactionDate},1,7) = ${month}`
+        transactionDateInMonth(transactions.transactionDate, month)
       )
     )
     .orderBy(asc(transactions.transactionDate), asc(vendors.code), asc(vendors.name));
   const totalMinor = rows.reduce((s, r) => s + r.amountMinor, 0);
-  return { month, rows, totalMinor };
+  return { month, book, rows, totalMinor };
 }
 
-/** 仕入先への月別支払一覧（振込先銀行・支店付き） */
-export async function getMonthlyVendorPaymentLines(month: string) {
+/** 月次明細 PDF（仕入・支払の登録のみ） */
+export async function getMonthlyApLedgerForPdf(month: string, book: ApBook) {
   if (!/^\d{4}-\d{2}$/.test(month)) throw new Error("月指定が不正です");
   const db = getDb();
   const sys = await getSystemAccounts(db);
+  const { apId } = resolveApAccounts(sys, book);
+  const rows = await db
+    .select({
+      id: transactions.id,
+      transactionDate: transactions.transactionDate,
+      kind: transactions.kind,
+      vendorName: vendors.name,
+      debitAmountMinor: transactions.debitAmountMinor,
+      creditAmountMinor: transactions.creditAmountMinor,
+      summary: transactions.summary,
+    })
+    .from(transactions)
+    .leftJoin(vendors, eq(transactions.vendorId, vendors.id))
+    .where(
+      and(
+        eq(transactions.accountId, apId),
+        sql`${transactions.kind} in ('ap_purchase','ap_payment')`,
+        transactionDateInMonth(transactions.transactionDate, month)
+      )
+    )
+    .orderBy(asc(transactions.transactionDate), asc(transactions.id));
+
+  let purchaseTotal = 0;
+  let paymentTotal = 0;
+  const lines = rows.map((r) => {
+    const isPurchase = r.kind === "ap_purchase";
+    const amountMinor = isPurchase ? r.creditAmountMinor : r.debitAmountMinor;
+    if (isPurchase) purchaseTotal += amountMinor;
+    else paymentTotal += amountMinor;
+    return {
+      id: r.id,
+      transactionDate: r.transactionDate,
+      kindLabel: isPurchase ? (book === "gaichu" ? "外注" : "仕入") : "支払",
+      partyName: r.vendorName ?? "",
+      amountMinor,
+      summary: r.summary,
+    };
+  });
+
+  return { month, book, rows: lines, purchaseTotal, paymentTotal };
+}
+
+/** 仕入先への月別支払一覧（振込先銀行・支店付き） */
+export async function getMonthlyVendorPaymentLines(month: string, book: ApBook) {
+  if (!/^\d{4}-\d{2}$/.test(month)) throw new Error("月指定が不正です");
+  const db = getDb();
+  const sys = await getSystemAccounts(db);
+  const { apId } = resolveApAccounts(sys, book);
   const rows = await db
     .select({
       transactionDate: transactions.transactionDate,
@@ -213,19 +271,20 @@ export async function getMonthlyVendorPaymentLines(month: string) {
     .leftJoin(vendors, eq(transactions.vendorId, vendors.id))
     .where(
       and(
-        eq(transactions.accountId, sys.apId),
+        eq(transactions.accountId, apId),
         eq(transactions.kind, "ap_payment"),
-        sql`substr(${transactions.transactionDate},1,7) = ${month}`
+        transactionDateInMonth(transactions.transactionDate, month)
       )
     )
     .orderBy(asc(transactions.transactionDate), asc(vendors.code), asc(vendors.name));
   const totalMinor = rows.reduce((s, r) => s + r.amountMinor, 0);
-  return { month, rows, totalMinor };
+  return { month, book, rows, totalMinor };
 }
 
-export async function getPayableBalances() {
+export async function getPayableBalances(book: ApBook) {
   const db = getDb();
   const sys = await getSystemAccounts(db);
+  const { apId } = resolveApAccounts(sys, book);
   const allVendors = await db.select().from(vendors).orderBy(asc(vendors.code), asc(vendors.name));
   const rows = await db
     .select({
@@ -233,7 +292,7 @@ export async function getPayableBalances() {
       balance: sql<number>`coalesce(sum(${transactions.creditAmountMinor} - ${transactions.debitAmountMinor}),0)`,
     })
     .from(transactions)
-    .where(and(eq(transactions.accountId, sys.apId), isNotNull(transactions.vendorId)))
+    .where(and(eq(transactions.accountId, apId), isNotNull(transactions.vendorId)))
     .groupBy(transactions.vendorId);
   const map = new Map(rows.map((r) => [r.vendorId, Number(r.balance)]));
   return allVendors.map((v) => ({ id: v.id, name: v.name, balanceMinor: map.get(v.id) ?? 0 }));
@@ -247,9 +306,10 @@ export type ApOpenLine = {
   openMinor: number;
 };
 
-export async function getApOpenLines(vendorId: string): Promise<ApOpenLine[]> {
+export async function getApOpenLines(vendorId: string, book: ApBook): Promise<ApOpenLine[]> {
   const db = getDb();
   const sys = await getSystemAccounts(db);
+  const { apId } = resolveApAccounts(sys, book);
   const purchaseTx = await db
     .select({
       id: transactions.id,
@@ -261,7 +321,7 @@ export async function getApOpenLines(vendorId: string): Promise<ApOpenLine[]> {
     .where(
       and(
         eq(transactions.vendorId, vendorId),
-        eq(transactions.accountId, sys.apId),
+        eq(transactions.accountId, apId),
         eq(transactions.kind, "ap_purchase"),
         gt(transactions.creditAmountMinor, 0)
       )
@@ -294,6 +354,7 @@ export async function getApOpenLines(vendorId: string): Promise<ApOpenLine[]> {
 }
 
 export async function registerApPayment(input: {
+  book: ApBook;
   vendorId: string;
   transactionDate: string;
   summary: string | null;
@@ -303,6 +364,7 @@ export async function registerApPayment(input: {
   feeBearer: TransferFeeBearer;
   allocations: { purchaseApCreditTransactionId: string; amountMinor: number }[];
 }) {
+  const book = parseApBook(input.book);
   const transfer = Math.floor(input.transferMinor);
   const fee = Math.max(0, Math.floor(input.transferFeeMinor || 0));
   const bearer = parseTransferFeeBearer(input.feeBearer);
@@ -321,7 +383,8 @@ export async function registerApPayment(input: {
 
   const db = getDb();
   const sys = await getSystemAccounts(db);
-  const openLines = await getApOpenLines(input.vendorId);
+  const { apId } = resolveApAccounts(sys, book);
+  const openLines = await getApOpenLines(input.vendorId, book);
   const openMap = new Map(openLines.map((l) => [l.id, l.openMinor]));
 
   for (const a of input.allocations) {
@@ -346,7 +409,7 @@ export async function registerApPayment(input: {
         id: apDebitId,
         entryGroupId,
         transactionDate: input.transactionDate,
-        accountId: sys.apId,
+        accountId: apId,
         vendorId: input.vendorId,
         amountMinor: allocTarget,
         debitAmountMinor: allocTarget,
@@ -396,6 +459,5 @@ export async function registerApPayment(input: {
     }
   });
 
-  revalidatePath("/admin/payables");
-  revalidatePath("/admin/bank-transactions");
+  revalidateAp(book);
 }

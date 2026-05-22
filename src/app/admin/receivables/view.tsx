@@ -1,8 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useRef, useState, useTransition } from "react";
 import { MonthlyExportLinks } from "@/components/monthly-export-links";
+import { AR_BOOK_LABELS, AR_BOOKS, type ArBook, arAdminPath } from "@/lib/ar-ap-books";
 import { FiscalPeriodInlineTable } from "@/lib/fiscal-period-ui";
 import { matchesListSearch } from "@/lib/list-search";
 import { arAllocationTargetMinor, type TransferFeeBearer } from "@/lib/payment-transfer-fee";
@@ -53,12 +55,14 @@ function fifoAllocate(lines: ArOpenLine[], total: number): Record<string, number
 }
 
 export function ReceivablesView({
+  book,
   balances,
   customers,
   recentLines,
   fiscalStart,
   fiscalEnd,
 }: {
+  book: ArBook;
   balances: { id: string; name: string; balanceMinor: number }[];
   customers: { id: string; name: string; code: string | null }[];
   fiscalStart?: string | null;
@@ -146,7 +150,7 @@ export function ReceivablesView({
                   }),
             }
           : { transactionDate: editDate, summary: editSummary.trim() || null };
-      void updateArHistoryLine(editLineId, payload)
+      void updateArHistoryLine(editLineId, book, payload)
         .then(() => {
           setMsg("履歴を更新しました");
           editRef.current?.close();
@@ -163,7 +167,7 @@ export function ReceivablesView({
       return;
     }
     startTransition(() =>
-      void getArOpenLines(cid)
+      void getArOpenLines(cid, book)
         .then((lines) => {
           setOpenLines(lines);
           const sum = lines.reduce((s, l) => s + l.openMinor, 0);
@@ -210,6 +214,7 @@ export function ReceivablesView({
       .filter((a) => a.amountMinor > 0);
     startTransition(() =>
       void registerArPayment({
+        book,
         customerId: payCustomerId,
         transactionDate: payDate,
         summary: paySummary.trim() || null,
@@ -228,7 +233,27 @@ export function ReceivablesView({
 
   return (
     <main style={{ display: "grid", gap: 16 }}>
-      <h1 className="m-0 text-3xl font-extrabold tracking-[0.08em] sm:text-4xl">売掛管理</h1>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", justifyContent: "space-between" }}>
+        <h1 className="m-0 text-3xl font-extrabold tracking-[0.08em] sm:text-4xl">売掛管理（{AR_BOOK_LABELS[book]}）</h1>
+        <nav style={{ display: "flex", gap: 8, flexWrap: "wrap", fontSize: 14, fontWeight: 700 }}>
+          {AR_BOOKS.map((b) => (
+            <Link
+              key={b}
+              href={arAdminPath(b)}
+              style={{
+                padding: "8px 12px",
+                borderRadius: 8,
+                border: b === book ? "2px solid #06b6d4" : "1px solid #94a3b8",
+                background: b === book ? "#ecfeff" : "#f8fafc",
+                color: b === book ? "#0e7490" : "#334155",
+                textDecoration: "none",
+              }}
+            >
+              {AR_BOOK_LABELS[b]}
+            </Link>
+          ))}
+        </nav>
+      </div>
       {msg ? (
         <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: "0.04em", color: msg.includes("失敗") ? "#b91c1c" : "#15803d" }}>{msg}</div>
       ) : null}
@@ -243,6 +268,7 @@ export function ReceivablesView({
         }
         style={{ ...card, display: "grid", gap: 8 }}
       >
+        <input type="hidden" name="book" value={book} />
         <h3 className="m-0 text-xl font-extrabold tracking-[0.06em]">売上登録</h3>
         <select style={inp} name="customerId" required>
           {customers.map((c) => (
@@ -319,9 +345,9 @@ export function ReceivablesView({
             <input style={inp} type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
             <MonthlyExportLinks
               month={month}
-              pdfHref="/admin/receivables/monthly-pdf"
-              csvHref="/admin/exports/receivables-monthly"
-              pdfLabel="月別入金 PDF"
+              pdfHref={`/admin/receivables/monthly-pdf?book=${book}`}
+              csvHref={`/admin/exports/receivables-monthly?book=${book}`}
+              pdfLabel="月次明細 PDF"
               csvLabel="月別入金 CSV"
             />
           </div>
@@ -370,7 +396,7 @@ export function ReceivablesView({
                       onClick={() => {
                         if (!window.confirm(`${r.kind === "ar_sale" ? "売上" : "入金"} の履歴を削除しますか？関連する仕訳もまとめて削除されます。`)) return;
                         startTransition(() =>
-                          void deleteArHistoryLine(r.id)
+                          void deleteArHistoryLine(r.id, book)
                             .then(() => {
                               setMsg("履歴を削除しました");
                               router.refresh();
