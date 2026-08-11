@@ -126,6 +126,19 @@ export function BankTransactionsView({
   const [accountPickQuery, setAccountPickQuery] = useState("");
   const [dialogMode, setDialogMode] = useState<"create" | "edit">("create");
   const [editingLineId, setEditingLineId] = useState("");
+  const [historyCopyId, setHistoryCopyId] = useState("");
+
+  /** 新規登録ダイアログ用：コピー可能な既存入出金（期首残高以外・新しい順） */
+  const copyableHistory = useMemo(() => {
+    return lines
+      .filter((r) => r.kind === "cash" && !isBankOpeningBalanceLine(r))
+      .slice()
+      .sort((a, b) => {
+        const byDate = b.transactionDate.localeCompare(a.transactionDate);
+        if (byDate !== 0) return byDate;
+        return b.id.localeCompare(a.id);
+      });
+  }, [lines]);
 
   const filteredPickAccounts = useMemo(() => {
     const q = accountPickQuery.trim();
@@ -152,6 +165,20 @@ export function BankTransactionsView({
     setDirection("in");
     setAccountPickQuery("");
     setEditingLineId("");
+    setHistoryCopyId("");
+  };
+
+  const applyHistoryCopy = (line: BankLedgerLine) => {
+    if (line.kind !== "cash") return;
+    setTxDate(line.transactionDate);
+    setAmountStr("");
+    setSummary(line.summary ?? "");
+    setDirection(line.flow);
+    setCounterAccountId(line.counterAccountId ?? "");
+    setCustomerId(line.flow === "in" ? line.customerId ?? "" : "");
+    setPayeeId(line.flow === "out" ? line.payeeId ?? "" : "");
+    setAccountPickQuery("");
+    setHistoryCopyId(line.id);
   };
 
   const openDialog = () => {
@@ -166,25 +193,9 @@ export function BankTransactionsView({
     setMsg("");
     setDialogMode("edit");
     setEditingLineId(line.id);
+    setHistoryCopyId("");
     setTxDate(line.transactionDate);
     setAmountStr(String(line.amountMinor));
-    setSummary(line.summary ?? "");
-    setDirection(line.flow);
-    setCounterAccountId(line.counterAccountId ?? "");
-    setCustomerId(line.flow === "in" ? line.customerId ?? "" : "");
-    setPayeeId(line.flow === "out" ? line.payeeId ?? "" : "");
-    setAccountPickQuery("");
-    dlg.current?.showModal();
-  };
-
-  /** 既存行を変更せず、金額以外を新規登録フォームへコピーする */
-  const openCopyDialog = (line: BankLedgerLine) => {
-    if (line.kind !== "cash") return;
-    setMsg("");
-    setDialogMode("create");
-    setEditingLineId("");
-    setTxDate(line.transactionDate);
-    setAmountStr("");
     setSummary(line.summary ?? "");
     setDirection(line.flow);
     setCounterAccountId(line.counterAccountId ?? "");
@@ -433,15 +444,6 @@ export function BankTransactionsView({
                       <button
                         type="button"
                         disabled={pending}
-                        onClick={() => openCopyDialog(r)}
-                        className="rounded-md border border-cyan-300 bg-cyan-50 px-2.5 py-1 text-xs font-bold text-cyan-800 hover:bg-cyan-100"
-                        title="金額以外をコピーして新規登録"
-                      >
-                        履歴コピー
-                      </button>
-                      <button
-                        type="button"
-                        disabled={pending}
                         onClick={() => handleDelete(r)}
                         className="rounded-md border border-red-200 bg-red-50 px-2.5 py-1 text-xs font-bold text-red-700 hover:bg-red-100"
                       >
@@ -476,12 +478,62 @@ export function BankTransactionsView({
           <p className="mt-2 text-sm font-semibold leading-relaxed text-slate-600">
             {dialogMode === "edit"
               ? "内容を変更すると、銀行口座と相手勘定の仕訳がまとめて更新されます。"
-              : "勘定科目はマスタ一覧から選択します。売掛・買掛の消込は行いません。入金の「顧客」・出金の「支払先」は任意で、通帳の「相手先」に表示します。履歴コピーから開いた場合は金額以外が入力済みです（元データは変更されません）。"}
+              : "勘定科目はマスタ一覧から選択します。売掛・買掛の消込は行いません。入金の「顧客」・出金の「支払先」は任意で、通帳の「相手先」に表示します。"}
           </p>
 
           {msg ? <div className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm font-bold text-red-800">{msg}</div> : null}
 
           <div className="mt-5 grid gap-4">
+            {dialogMode === "create" ? (
+              <div className="grid gap-2 rounded-lg border border-cyan-200 bg-cyan-50/70 p-3">
+                <Label className="font-bold text-cyan-950">履歴コピー</Label>
+                <p className="text-xs font-semibold text-cyan-900/80">
+                  既存の入出金から金額以外（日付・種類・勘定科目・相手先・摘要）をコピーします。元データは変わりません。
+                </p>
+                <Select
+                  value={historyCopyId || "__none__"}
+                  onValueChange={(v) => {
+                    if (v === "__none__") {
+                      setHistoryCopyId("");
+                      return;
+                    }
+                    const line = copyableHistory.find((r) => r.id === v);
+                    if (line) applyHistoryCopy(line);
+                  }}
+                >
+                  <SelectTrigger className="min-h-11 bg-white font-semibold">
+                    <SelectValue placeholder="コピーする履歴を選択" />
+                  </SelectTrigger>
+                  <SelectContent container={dialogPortalHost} className="max-h-72">
+                    <SelectItem value="__none__" textValue="選択しない">
+                      選択しない
+                    </SelectItem>
+                    {copyableHistory.map((r) => {
+                      const flowLabel = r.flow === "in" ? "入金" : "出金";
+                      const party = r.counterparty?.trim() || "相手先なし";
+                      const note = r.summary?.trim() || "摘要なし";
+                      const label = `${r.transactionDate} ${flowLabel} / ${r.accountName} / ${party} / ${note}`;
+                      return (
+                        <SelectItem key={r.id} value={r.id} textValue={label}>
+                          <div className="flex flex-col gap-0.5 py-0.5 text-left">
+                            <span className="text-sm font-extrabold text-slate-900">
+                              {r.transactionDate} · {flowLabel} · {r.accountName}
+                            </span>
+                            <span className="text-xs font-semibold text-slate-500">
+                              {party} · {note}
+                            </span>
+                          </div>
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectContent>
+                </Select>
+                {copyableHistory.length === 0 ? (
+                  <p className="text-xs font-semibold text-slate-500">まだコピーできる入出金履歴がありません。</p>
+                ) : null}
+              </div>
+            ) : null}
+
             <div className="grid gap-2">
               <Label className="font-bold">種類</Label>
               <div
