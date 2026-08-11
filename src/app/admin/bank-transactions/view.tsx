@@ -177,6 +177,23 @@ export function BankTransactionsView({
     dlg.current?.showModal();
   };
 
+  /** 既存行を変更せず、金額以外を新規登録フォームへコピーする */
+  const openCopyDialog = (line: BankLedgerLine) => {
+    if (line.kind !== "cash") return;
+    setMsg("");
+    setDialogMode("create");
+    setEditingLineId("");
+    setTxDate(line.transactionDate);
+    setAmountStr("");
+    setSummary(line.summary ?? "");
+    setDirection(line.flow);
+    setCounterAccountId(line.counterAccountId ?? "");
+    setCustomerId(line.flow === "in" ? line.customerId ?? "" : "");
+    setPayeeId(line.flow === "out" ? line.payeeId ?? "" : "");
+    setAccountPickQuery("");
+    dlg.current?.showModal();
+  };
+
   const movementPayload = () => ({
     bankAccountId,
     transactionDate: txDate,
@@ -416,6 +433,15 @@ export function BankTransactionsView({
                       <button
                         type="button"
                         disabled={pending}
+                        onClick={() => openCopyDialog(r)}
+                        className="rounded-md border border-cyan-300 bg-cyan-50 px-2.5 py-1 text-xs font-bold text-cyan-800 hover:bg-cyan-100"
+                        title="金額以外をコピーして新規登録"
+                      >
+                        履歴コピー
+                      </button>
+                      <button
+                        type="button"
+                        disabled={pending}
                         onClick={() => handleDelete(r)}
                         className="rounded-md border border-red-200 bg-red-50 px-2.5 py-1 text-xs font-bold text-red-700 hover:bg-red-100"
                       >
@@ -450,7 +476,7 @@ export function BankTransactionsView({
           <p className="mt-2 text-sm font-semibold leading-relaxed text-slate-600">
             {dialogMode === "edit"
               ? "内容を変更すると、銀行口座と相手勘定の仕訳がまとめて更新されます。"
-              : "勘定科目はマスタ一覧から選択します。売掛・買掛の消込は行いません。入金の「顧客」・出金の「支払先」は任意で、通帳の「相手先」に表示します。"}
+              : "勘定科目はマスタ一覧から選択します。売掛・買掛の消込は行いません。入金の「顧客」・出金の「支払先」は任意で、通帳の「相手先」に表示します。履歴コピーから開いた場合は金額以外が入力済みです（元データは変更されません）。"}
           </p>
 
           {msg ? <div className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm font-bold text-red-800">{msg}</div> : null}
