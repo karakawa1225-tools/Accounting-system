@@ -586,7 +586,7 @@ export function BankTransactionsView({
                     if (line) applyHistoryCopy(line);
                   }}
                 >
-                  <SelectTrigger className="min-h-12 w-full bg-white text-left text-base font-semibold">
+                  <SelectTrigger className="h-auto min-h-[5.5rem] w-full items-start whitespace-normal bg-white py-3 pr-10 text-left text-base font-semibold [&>span]:block [&>span]:w-full [&>span]:whitespace-normal [&>span]:break-words [&>span]:leading-snug [&>span]:line-clamp-none">
                     <SelectValue placeholder={`${direction === "in" ? "入金" : "出金"}履歴からコピーする行を選択`} />
                   </SelectTrigger>
                   <SelectContent container={dialogPortalHost} className="max-h-[min(24rem,var(--radix-select-content-available-height))] w-[var(--radix-select-trigger-width)]">
