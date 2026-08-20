@@ -164,19 +164,32 @@ async function assertBankMovementInput(input: BankMovementInput, bankAccountId: 
   return { amount, summary: input.summary?.trim() ? input.summary.trim() : null, counterId };
 }
 
+type InsertBankMovementOpts = {
+  /** 編集時に一覧の並び（日付→作成日時）を変えないため、元の createdAt を引き継ぐ */
+  createdAt?: Date;
+  /** 銀行側行の ID を維持（編集後も同じ行として見えるように） */
+  bankRowId?: string;
+  counterRowId?: string;
+};
+
 async function insertBankMovementPair(
   db: ReturnType<typeof getDb>,
   entryGroupId: string,
   bankAccountId: string,
-  input: BankMovementInput
+  input: BankMovementInput,
+  opts: InsertBankMovementOpts = {}
 ) {
   const { amount, summary, counterId } = await assertBankMovementInput(input, bankAccountId);
   const customerOnBank = input.direction === "in" ? input.customerId : null;
   const payeeOnBank = input.direction === "out" ? input.payeeId : null;
+  const createdAt = opts.createdAt;
+  const bankId = opts.bankRowId;
+  const counterIdRow = opts.counterRowId;
 
   if (input.direction === "in") {
     await db.insert(transactions).values([
       {
+        ...(bankId ? { id: bankId } : {}),
         entryGroupId,
         transactionDate: input.transactionDate,
         accountId: bankAccountId,
@@ -188,8 +201,10 @@ async function insertBankMovementPair(
         creditAmountMinor: 0,
         summary,
         kind: "cash",
+        ...(createdAt ? { createdAt } : {}),
       },
       {
+        ...(counterIdRow ? { id: counterIdRow } : {}),
         entryGroupId,
         transactionDate: input.transactionDate,
         accountId: counterId,
@@ -201,11 +216,13 @@ async function insertBankMovementPair(
         creditAmountMinor: amount,
         summary,
         kind: "cash",
+        ...(createdAt ? { createdAt } : {}),
       },
     ]);
   } else {
     await db.insert(transactions).values([
       {
+        ...(counterIdRow ? { id: counterIdRow } : {}),
         entryGroupId,
         transactionDate: input.transactionDate,
         accountId: counterId,
@@ -217,8 +234,10 @@ async function insertBankMovementPair(
         creditAmountMinor: 0,
         summary,
         kind: "cash",
+        ...(createdAt ? { createdAt } : {}),
       },
       {
+        ...(bankId ? { id: bankId } : {}),
         entryGroupId,
         transactionDate: input.transactionDate,
         accountId: bankAccountId,
@@ -230,6 +249,7 @@ async function insertBankMovementPair(
         creditAmountMinor: amount,
         summary,
         kind: "cash",
+        ...(createdAt ? { createdAt } : {}),
       },
     ]);
   }
@@ -258,8 +278,16 @@ export async function updateBankCashMovement(bankTransactionId: string, input: B
   const bankAccountId = input.bankAccountId ?? sys.bankId;
   const row = await getEditableBankCashRow(db, bankTransactionId, bankAccountId);
   const entryGroupId = row.entryGroupId!;
+  const groupRows = await db.select().from(transactions).where(eq(transactions.entryGroupId, entryGroupId));
+  const bankRow = groupRows.find((r) => r.accountId === bankAccountId) ?? row;
+  const counterRow = groupRows.find((r) => r.id !== bankRow.id && r.accountId !== bankAccountId);
+  // 一覧は transactionDate → createdAt 順。編集で作り直しても並びが動かないよう元値を保持する
   await db.delete(transactions).where(eq(transactions.entryGroupId, entryGroupId));
-  await insertBankMovementPair(db, entryGroupId, bankAccountId, input);
+  await insertBankMovementPair(db, entryGroupId, bankAccountId, input, {
+    createdAt: bankRow.createdAt,
+    bankRowId: bankRow.id,
+    counterRowId: counterRow?.id,
+  });
   revalidateBankPaths();
 }
 
