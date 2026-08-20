@@ -127,6 +127,7 @@ export function BankTransactionsView({
   const [dialogMode, setDialogMode] = useState<"create" | "edit">("create");
   const [editingLineId, setEditingLineId] = useState("");
   const [historyCopyId, setHistoryCopyId] = useState("");
+  const [historyCopyQuery, setHistoryCopyQuery] = useState("");
 
   /** 新規登録ダイアログ用：コピー可能な既存入出金（期首残高以外・新しい順） */
   const copyableHistory = useMemo(() => {
@@ -139,6 +140,28 @@ export function BankTransactionsView({
         return b.id.localeCompare(a.id);
       });
   }, [lines]);
+
+  /** 選択中の種類（入金/出金）に合わせた履歴 */
+  const copyableHistoryForDirection = useMemo(() => {
+    return copyableHistory.filter((r) => r.flow === direction);
+  }, [copyableHistory, direction]);
+
+  const filteredCopyableHistory = useMemo(() => {
+    const q = historyCopyQuery.trim();
+    if (!q) return copyableHistoryForDirection;
+    return copyableHistoryForDirection.filter((r) => {
+      const hay = [
+        r.transactionDate,
+        r.flow === "in" ? "入金" : "出金",
+        r.accountName,
+        r.counterparty ?? "",
+        r.summary ?? "",
+        String(r.amountMinor),
+        yen(r.amountMinor),
+      ].join(" ");
+      return matchesListSearch(hay, q);
+    });
+  }, [copyableHistoryForDirection, historyCopyQuery]);
 
   const filteredPickAccounts = useMemo(() => {
     const q = accountPickQuery.trim();
@@ -166,11 +189,12 @@ export function BankTransactionsView({
     setAccountPickQuery("");
     setEditingLineId("");
     setHistoryCopyId("");
+    setHistoryCopyQuery("");
   };
 
+  /** 日付・金額はコピーしない（種類・勘定・相手先・摘要のみ） */
   const applyHistoryCopy = (line: BankLedgerLine) => {
     if (line.kind !== "cash") return;
-    setTxDate(line.transactionDate);
     setAmountStr("");
     setSummary(line.summary ?? "");
     setDirection(line.flow);
@@ -469,7 +493,10 @@ export function BankTransactionsView({
 
       <dialog
         ref={bindDialogRef}
-        className="w-full max-w-lg rounded-xl border border-slate-300 bg-white p-0 shadow-2xl backdrop:bg-black/40"
+        className={cn(
+          "w-full rounded-xl border border-slate-300 bg-white p-0 shadow-2xl backdrop:bg-black/40",
+          dialogMode === "create" ? "max-w-3xl" : "max-w-lg"
+        )}
       >
         <div className="p-6">
           <h2 className="m-0 text-xl font-black tracking-[0.1em] text-slate-900">
@@ -484,56 +511,6 @@ export function BankTransactionsView({
           {msg ? <div className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm font-bold text-red-800">{msg}</div> : null}
 
           <div className="mt-5 grid gap-4">
-            {dialogMode === "create" ? (
-              <div className="grid gap-2 rounded-lg border border-cyan-200 bg-cyan-50/70 p-3">
-                <Label className="font-bold text-cyan-950">履歴コピー</Label>
-                <p className="text-xs font-semibold text-cyan-900/80">
-                  既存の入出金から金額以外（日付・種類・勘定科目・相手先・摘要）をコピーします。元データは変わりません。
-                </p>
-                <Select
-                  value={historyCopyId || "__none__"}
-                  onValueChange={(v) => {
-                    if (v === "__none__") {
-                      setHistoryCopyId("");
-                      return;
-                    }
-                    const line = copyableHistory.find((r) => r.id === v);
-                    if (line) applyHistoryCopy(line);
-                  }}
-                >
-                  <SelectTrigger className="min-h-11 bg-white font-semibold">
-                    <SelectValue placeholder="コピーする履歴を選択" />
-                  </SelectTrigger>
-                  <SelectContent container={dialogPortalHost} className="max-h-72">
-                    <SelectItem value="__none__" textValue="選択しない">
-                      選択しない
-                    </SelectItem>
-                    {copyableHistory.map((r) => {
-                      const flowLabel = r.flow === "in" ? "入金" : "出金";
-                      const party = r.counterparty?.trim() || "相手先なし";
-                      const note = r.summary?.trim() || "摘要なし";
-                      const label = `${r.transactionDate} ${flowLabel} / ${r.accountName} / ${party} / ${note}`;
-                      return (
-                        <SelectItem key={r.id} value={r.id} textValue={label}>
-                          <div className="flex flex-col gap-0.5 py-0.5 text-left">
-                            <span className="text-sm font-extrabold text-slate-900">
-                              {r.transactionDate} · {flowLabel} · {r.accountName}
-                            </span>
-                            <span className="text-xs font-semibold text-slate-500">
-                              {party} · {note}
-                            </span>
-                          </div>
-                        </SelectItem>
-                      );
-                    })}
-                  </SelectContent>
-                </Select>
-                {copyableHistory.length === 0 ? (
-                  <p className="text-xs font-semibold text-slate-500">まだコピーできる入出金履歴がありません。</p>
-                ) : null}
-              </div>
-            ) : null}
-
             <div className="grid gap-2">
               <Label className="font-bold">種類</Label>
               <div
@@ -546,6 +523,7 @@ export function BankTransactionsView({
                   onClick={() => {
                     setDirection("in");
                     setPayeeId("");
+                    setHistoryCopyId("");
                   }}
                   className={cn(
                     "min-h-[48px] flex-1 rounded-lg text-base font-black tracking-[0.12em] transition-all",
@@ -561,6 +539,7 @@ export function BankTransactionsView({
                   onClick={() => {
                     setDirection("out");
                     setCustomerId("");
+                    setHistoryCopyId("");
                   }}
                   className={cn(
                     "min-h-[48px] flex-1 rounded-lg text-base font-black tracking-[0.12em] transition-all",
@@ -576,6 +555,77 @@ export function BankTransactionsView({
                 {direction === "in" ? "預金が増える取引（普通預金の借方）" : "預金が減る取引（普通預金の貸方）"}
               </p>
             </div>
+
+            {dialogMode === "create" ? (
+              <div className="grid gap-3 rounded-xl border border-cyan-200 bg-cyan-50/70 p-4">
+                <div>
+                  <Label className="text-base font-bold text-cyan-950">
+                    履歴コピー（{direction === "in" ? "入金" : "出金"}のみ）
+                  </Label>
+                  <p className="mt-1 text-sm font-semibold leading-relaxed text-cyan-900/80">
+                    同じ種類の既存入出金から、日付・金額以外（勘定科目・相手先・摘要）をコピーします。元データは変わりません。
+                  </p>
+                </div>
+                <Input
+                  type="search"
+                  value={historyCopyQuery}
+                  onChange={(e) => setHistoryCopyQuery(e.target.value)}
+                  placeholder="履歴を検索（日付・勘定・相手先・摘要・金額など）"
+                  className="min-h-11 w-full bg-white text-base font-semibold"
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+                <Select
+                  value={historyCopyId || "__none__"}
+                  onValueChange={(v) => {
+                    if (v === "__none__") {
+                      setHistoryCopyId("");
+                      return;
+                    }
+                    const line = copyableHistoryForDirection.find((r) => r.id === v);
+                    if (line) applyHistoryCopy(line);
+                  }}
+                >
+                  <SelectTrigger className="min-h-12 w-full bg-white text-left text-base font-semibold">
+                    <SelectValue placeholder={`${direction === "in" ? "入金" : "出金"}履歴からコピーする行を選択`} />
+                  </SelectTrigger>
+                  <SelectContent container={dialogPortalHost} className="max-h-[min(24rem,var(--radix-select-content-available-height))] w-[var(--radix-select-trigger-width)]">
+                    <SelectItem value="__none__" textValue="選択しない">
+                      選択しない
+                    </SelectItem>
+                    {filteredCopyableHistory.map((r) => {
+                      const party = r.counterparty?.trim() || "相手先なし";
+                      const note = r.summary?.trim() || "摘要なし";
+                      const label = `${r.transactionDate} / ${r.accountName} / ${party} / ${note} / ${yen(r.amountMinor)}`;
+                      return (
+                        <SelectItem key={r.id} value={r.id} textValue={label}>
+                          <div className="flex w-full flex-col gap-1 py-1 text-left">
+                            <span className="text-base font-extrabold text-slate-900">
+                              {r.transactionDate} · {r.accountName}
+                            </span>
+                            <span className="text-sm font-semibold text-slate-600">
+                              {party} · {note}
+                            </span>
+                            <span className="font-mono text-sm font-bold tabular-nums text-slate-500">{yen(r.amountMinor)}</span>
+                          </div>
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectContent>
+                </Select>
+                {copyableHistoryForDirection.length === 0 ? (
+                  <p className="text-sm font-semibold text-slate-500">
+                    {direction === "in" ? "入金" : "出金"}のコピーできる履歴がまだありません。
+                  </p>
+                ) : filteredCopyableHistory.length === 0 ? (
+                  <p className="text-sm font-semibold text-slate-500">検索条件に合う履歴がありません。</p>
+                ) : (
+                  <p className="text-xs font-semibold text-slate-500">
+                    {filteredCopyableHistory.length} 件（{direction === "in" ? "入金" : "出金"}履歴 {copyableHistoryForDirection.length} 件中）
+                  </p>
+                )}
+              </div>
+            ) : null}
 
             <div className="grid grid-cols-2 gap-3">
               <div className="grid gap-2">
