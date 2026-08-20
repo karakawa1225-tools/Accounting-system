@@ -30,6 +30,20 @@ function yen(v: number) {
   return new Intl.NumberFormat("ja-JP", { style: "currency", currency: "JPY", maximumFractionDigits: 0 }).format(v);
 }
 
+/** 新規登録の初期日付：対象月の中で、今日と同じ日（月末超えは月末に丸める） */
+function defaultTxDateForTargetMonth(targetMonth: string): string {
+  if (!/^\d{4}-\d{2}$/.test(targetMonth)) {
+    return new Date().toISOString().slice(0, 10);
+  }
+  const [yStr, mStr] = targetMonth.split("-");
+  const y = Number(yStr);
+  const m = Number(mStr);
+  const todayDay = new Date().getDate();
+  const lastDay = new Date(y, m, 0).getDate();
+  const day = Math.min(todayDay, lastDay);
+  return `${yStr}-${mStr}-${String(day).padStart(2, "0")}`;
+}
+
 const accountCatLabel: Record<string, string> = ACCOUNT_CATEGORY_LABEL_JA;
 
 const passbookWrap: React.CSSProperties = {
@@ -117,7 +131,7 @@ export function BankTransactionsView({
   }, [lines, month, flowFilter, lineKeyword]);
 
   const [direction, setDirection] = useState<"in" | "out">("in");
-  const [txDate, setTxDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [txDate, setTxDate] = useState(() => defaultTxDateForTargetMonth(new Date().toISOString().slice(0, 7)));
   const [amountStr, setAmountStr] = useState("");
   const [summary, setSummary] = useState("");
   const [counterAccountId, setCounterAccountId] = useState<string>("");
@@ -179,7 +193,7 @@ export function BankTransactionsView({
   }, [accounts, accountPickQuery, counterAccountId]);
 
   const resetForm = () => {
-    setTxDate(new Date().toISOString().slice(0, 10));
+    setTxDate(defaultTxDateForTargetMonth(month));
     setAmountStr("");
     setSummary("");
     setCounterAccountId("");
